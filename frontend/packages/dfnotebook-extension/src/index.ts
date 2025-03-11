@@ -23,7 +23,6 @@ import {
   SessionContextDialogs,
   showDialog,
   MainAreaWidget,
-  ToolbarButton,
   Toolbar
 } from '@jupyterlab/apputils';
 import { Graph, Manager as GraphManager, ViewerWidget } from '@dfnotebook/dfgraph';
@@ -102,10 +101,40 @@ import { cellExecutor } from './cellexecutor';
 import { CellBarExtension } from '@jupyterlab/cell-toolbar';
 import { Widget } from '@lumino/widgets';
 import tagSvgstr from '../style/tag.svg';
+import tagOffSvgstr from '../style/tag-off.svg';
+import reactiveSvgstr from '../style/reactive.svg';
+import nonReactiveSvgstr from '../style/non-reactive.svg';
+import depViewerSvgstr from '../style/dep-viewer.svg';
+import minimapSvgstr from '../style/minimap.svg';
 
 export const tagIcon = new LabIcon({
   name: 'tag',
   svgstr: tagSvgstr
+});
+
+export const tagOffIcon = new LabIcon({
+  name: 'tag-off',
+  svgstr: tagOffSvgstr
+})
+
+export const reactiveIcon = new LabIcon({
+  name: 'reactive',
+  svgstr: reactiveSvgstr
+});
+
+export const nonReactiveIcon = new LabIcon({
+  name: 'non-reactive',
+  svgstr: nonReactiveSvgstr
+});
+
+export const depViewerIcon = new LabIcon({
+  name: 'dep-viewer',
+  svgstr: depViewerSvgstr
+});
+
+export const minimapIcon = new LabIcon({
+  name: 'df-minimap',
+  svgstr: minimapSvgstr
 });
 
 /**
@@ -300,6 +329,16 @@ namespace CommandIDs {
   export const modifyCellName = 'notebook:modify-cell-name';
 
   export const setCellName = 'toolbar-button:set-cell-name';
+
+  export const reactiveCodeCell = 'toolbar-button:reactive-cell';
+
+  export const toggleTagsCmd = 'dfnotebook:toggle-tags';
+
+  export const toggleReactiveCmd = 'dfnotebook:toggle-reactive';
+
+  export const depViewerCmd = 'dfnotebook:dep-viewer';
+
+  export const minimapCmd = 'dfnotebook:minimap';
 }
 
 /**
@@ -477,172 +516,152 @@ const GraphManagerPlugin: JupyterFrontEndPlugin<void> = {
 
 }
 
-// /**
-//  * Initialization data for the Dfnb Depviewer extension.
-//  */
+/**
+ * Initialization data for the Dfnb Depviewer extension.
+ */
 const DepViewer: JupyterFrontEndPlugin<void> = {
   id: 'dfnb-depview',
   autoStart: true,
   requires: [ICommandPalette, INotebookTracker],
-  activate: (app: JupyterFrontEnd, palette: ICommandPalette, nbTrackers: INotebookTracker) => {
-
-  // Create a blank content widget inside of a MainAreaWidget
-      const newWidget = () => {
-          const content = new ViewerWidget();
-          //GraphManager uses flags from the ViewerWidget
-          GraphManager.depWidget = content;
-          const widget = new MainAreaWidget({ content });
-          widget.id = 'dfnb-depview';
-          widget.title.label = 'Dependency Viewer';
-          widget.title.closable = true;
-          // Add a div to the panel
-          let panel = document.createElement('div');
-          panel.setAttribute('id','depview');
-          content.node.appendChild(panel);
-          return widget;
+  activate: (
+    app: JupyterFrontEnd,
+    palette: ICommandPalette,
+    nbTrackers: INotebookTracker
+  ) => {
+    // Create a blank content widget inside of a MainAreaWidget
+    const newWidget = () => {
+      const content = new ViewerWidget();
+      //GraphManager uses flags from the ViewerWidget
+      GraphManager.depWidget = content;
+      const widget = new MainAreaWidget({ content });
+      widget.id = 'dfnb-depview';
+      widget.title.label = 'Dependency Viewer';
+      widget.title.closable = true;
+      // Add a div to the panel
+      let panel = document.createElement('div');
+      panel.setAttribute('id', 'depview');
+      content.node.appendChild(panel);
+      return widget;
+    };
+    let widget = newWidget();
+    function openDepViewer() {
+      if (widget.isDisposed) {
+        widget = newWidget();
+        GraphManager.depview.isCreated = false;
       }
-      let widget = newWidget();
-          function openDepViewer(){
-              if (widget.isDisposed) {
-                widget = newWidget();
-                GraphManager.depview.isCreated = false;
-              }
-              if (!widget.isAttached) {
-                // Attach the widget to the main work area if it's not there
-                app.shell.add(widget, 'main',{
-                    mode: 'split-right',
-                    activate: false
-                });
-                if (!GraphManager.depview.isCreated){
-                  GraphManager.depview.createDepDiv();
-                }
-
-              }
-              // Activate the widget
-              app.shell.activateById(widget.id);
-              GraphManager.depview.isOpen = true;
-              GraphManager.depview.startGraphCreation();
-            }
-
-          nbTrackers.widgetAdded.connect((sender,nbPanel) => {
-            const session = nbPanel.sessionContext;
-              session.ready.then(() => {
-                if(session.session?.kernel?.name == 'dfpython3'){
-
-                    const button = new ToolbarButton({
-                        className: 'open-dep-view',
-                        label: 'Open Dependency Viewer',
-                        onClick: openDepViewer,
-                        tooltip: 'Opens the Dependency Viewer',
-                    });
-                    nbPanel.toolbar.insertItem(10, 'Open Dependency Viewer', button);
-                }
-              });
-           });
-
-          // Add an application command
-          const command: string = 'depview:open';
-          app.commands.addCommand(command, {
-            label: 'Open Dependency Viewer',
-            execute: () => openDepViewer,
-          });
-
-          // Add the command to the palette.
-          palette.addItem({ command, category: 'Tutorial' });
+      if (!widget.isAttached) {
+        // Attach the widget to the main work area if it's not there
+        app.shell.add(widget, 'main', {
+          mode: 'split-right',
+          activate: false
+        });
+        if (!GraphManager.depview.isCreated) {
+          GraphManager.depview.createDepDiv();
         }
+      }
+      // Activate the widget
+      app.shell.activateById(widget.id);
+      GraphManager.depview.isOpen = true;
+      GraphManager.depview.startGraphCreation();
+    }
+
+    app.commands.addCommand(CommandIDs.depViewerCmd, {
+      label: 'Open Dependency Viewer',
+      caption: 'Open Dependency Viewer',
+      execute: args => {
+        openDepViewer();
+      },
+      icon: args => (args.toolbar ? depViewerIcon : undefined),
+    });
+
+    // Add the command to the palette.
+    // FIXME why is this tutorial category?
+    palette.addItem({ command: CommandIDs.depViewerCmd, category: 'Tutorial' });
+  }
 };
 
-// /**
-//  * Initialization data for the Minimap extension.
-//  */
+/**
+ * Initialization data for the Minimap extension.
+ */
 const MiniMap: JupyterFrontEndPlugin<void> = {
   id: 'dfnb-minimap',
   autoStart: true,
   requires: [ICommandPalette, INotebookTracker],
-  activate: (app: JupyterFrontEnd, palette: ICommandPalette, nbTrackers: INotebookTracker) => {
+  activate: (
+    app: JupyterFrontEnd,
+    palette: ICommandPalette,
+    nbTrackers: INotebookTracker
+  ) => {
+    const newWidget = () => {
+      const content = new ViewerWidget();
+      //Graph Manager maintains the flags on the widgets
+      GraphManager.miniWidget = content;
+      const widget = new MainAreaWidget({ content });
+      widget.id = 'dfnb-minimap';
+      widget.title.label = 'Notebook Minimap';
+      widget.title.closable = true;
+      // Add a div to the panel
+      let panel = document.createElement('div');
+      panel.setAttribute('id', 'minimap');
+      let inner = document.createElement('div');
+      inner.setAttribute('id', 'minidiv');
+      let svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttributeNS(
+        'http://www.w3.org/2000/xmlns/',
+        'xmlns:xlink',
+        'http://www.w3.org/1999/xlink'
+      );
+      svg.setAttribute('id', 'minisvg');
+      inner.append(svg);
 
-      const newWidget = () => {
-          const content = new ViewerWidget();
-          //Graph Manager maintains the flags on the widgets
-          GraphManager.miniWidget = content;
-          const widget = new MainAreaWidget({ content });
-          widget.id = 'dfnb-minimap';
-          widget.title.label = 'Notebook Minimap';
-          widget.title.closable = true;
-          // Add a div to the panel
-            let panel = document.createElement('div');
-            panel.setAttribute('id','minimap');
-            let inner = document.createElement('div');
-            inner.setAttribute('id','minidiv');
-            let svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-            svg.setAttributeNS("http://www.w3.org/2000/xmlns/", "xmlns:xlink", "http://www.w3.org/1999/xlink");
-            svg.setAttribute('id','minisvg');
-            inner.append(svg);
+      panel.appendChild(inner);
+      content.node.appendChild(panel);
+      return widget;
+    };
+    let widget = newWidget();
 
-            panel.appendChild(inner);
-            content.node.appendChild(panel);
-            return widget;
-       }
-        let widget = newWidget();
+    function openMinimap() {
+      if (widget.isDisposed) {
+        widget = newWidget();
+        GraphManager.minimap.wasCreated = false;
+      }
+      if (!widget.isAttached) {
+        app.shell.add(widget, 'main', {
+          mode: 'split-right',
+          activate: false
+        });
+        //'right');
 
-        nbTrackers.widgetAdded.connect((sender,nbPanel) => {
-            const session = nbPanel.sessionContext;
-              session.ready.then(() => {
-                if(session.session?.kernel?.name == 'dfpython3'){
+        if (!GraphManager.minimap.wasCreated) {
+          console.log(
+            'Active Graph',
+            GraphManager.graphs[GraphManager.currentGraph]
+          );
 
-                    const button = new ToolbarButton({
-                        className: 'open-mini-map',
-                        label: 'Open Minimap',
-                        onClick: openMinimap,
-                        tooltip: 'Opens the Minimap',
-                    });
-                    nbPanel.toolbar.insertItem(10, 'Open Minimap', button);
-                }
-              });
-           });
-
-          function openMinimap(){
-
-              if (widget.isDisposed) {
-                widget = newWidget();
-                GraphManager.minimap.wasCreated = false;
-              }
-              if (!widget.isAttached) {
-
-                app.shell.add(widget, 'main'
-                ,{
-                    mode: 'split-right',
-                    activate: false
-                });
-                //'right');
-
-                if(!GraphManager.minimap.wasCreated){
-                    console.log("Active Graph",GraphManager.graphs[GraphManager.currentGraph])
-
-                    // Activate the widget
-                    app.shell.activateById(widget.id);
-                    GraphManager.minimap.createMiniArea();
-                    GraphManager.minimap.wasCreated = true;
-                }
-                else{
-                    GraphManager.minimap.startMinimapCreation();
-                }
-
-              }
-            }
-
-          // Add an application command
-          const command: string = 'minimap:open';
-          app.commands.addCommand(command, {
-            label: 'Open Minimap',
-            execute: () => openMinimap,
-          });
-
-          // Add the command to the palette.
-          palette.addItem({ command, category: 'Tutorial' });
+          // Activate the widget
+          app.shell.activateById(widget.id);
+          GraphManager.minimap.createMiniArea();
+          GraphManager.minimap.wasCreated = true;
+        } else {
+          GraphManager.minimap.startMinimapCreation();
         }
-};
+      }
+    }
 
+    app.commands.addCommand(CommandIDs.minimapCmd, {
+      label: 'Open Minimap',
+      caption: 'Open Minimap',
+      execute: args => {
+        openMinimap();
+      },
+      icon: args => (args.toolbar ? minimapIcon : undefined)
+    });
+
+    // Add the command to the palette.
+    // FIXME why is this tutorial category?
+    palette.addItem({ command: CommandIDs.minimapCmd, category: 'Tutorial' });
+  }
+};
 
 const cellToolbar: JupyterFrontEndPlugin<void> = {
   id: '@dfnotebook/dfnotebook-extension:cell-toolbar',
@@ -674,96 +693,86 @@ const cellToolbar: JupyterFrontEndPlugin<void> = {
   optional: [ISettingRegistry, IToolbarWidgetRegistry, ITranslator]
 };
 
-/**
- * Creates the toggle switch used for hiding/showing cell names
- */
-class ToggleCellNamesWidget extends Widget {
-  constructor(nbPanel: NotebookPanel, app: JupyterFrontEnd) {
-    super();
-    this.addClass('jupyter-toggle-switch-widget');
+const panelToolbar: JupyterFrontEndPlugin<void> = {
+  id: '@dfnotebook/dfnotebook-extension:panel-toolbar',
+  description: 'Add dfnotebook toolbar items to the notebook panel.',
+  autoStart: true,
+  requires: [INotebookTracker],
+  activate: (app: JupyterFrontEnd, tracker: INotebookTracker) => {
+    app.commands.addCommand(CommandIDs.toggleTagsCmd, {
+      label: 'Toggle Cell Names',
+      caption: 'Toggle Cell Names',
+      execute: args => {
+        const current = tracker.currentWidget;
+        if (current) {
+          const notebook = current.content;
+          let tagsEnabled = notebook.model?.getMetadata("enable_tags") ?? true;
+          tagsEnabled = !tagsEnabled;
 
-    const containerDiv = document.createElement('div');
-    containerDiv.className = 'toggle-container';
-
-    const labelText = document.createElement('span');
-    labelText.textContent = 'Tags';
-    labelText.className = 'toggle-label';
-
-    const label = document.createElement('label');
-    label.className = 'switch';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.checked = true;
-
-    const slider = document.createElement('span');
-    slider.className = 'slider round';
-
-    label.appendChild(input);
-    label.appendChild(slider);
-
-    containerDiv.appendChild(labelText);
-    containerDiv.appendChild(label);
-
-    const updateTooltip = (isChecked: boolean) => {
-      const tooltipText = isChecked ? `Toggle to hide cell names in the notebook`: `Toggle to show cell names in the notebook`;
-      label.title = tooltipText;
-      labelText.title = tooltipText;
-      slider.title = tooltipText;
-    };
-
-    updateTooltip(true);
-    updateNotebookCellsWithTag(nbPanel.model as DataflowNotebookModel, "", nbPanel.sessionContext,false, false, true);
-
-    input.addEventListener('change', async (event) => {
-      const isChecked = (event.target as HTMLInputElement).checked;
-      const notebook = nbPanel.content
-      const cellsArray = Array.from(notebook.widgets);
-      updateTooltip(isChecked);
-
-      cellsArray.forEach(cAny => {
-        const dfmetadata = cAny.model.getMetadata('dfmetadata');
-        if (cAny.model.type == 'code' && dfmetadata.tag){
-          const inputArea = (cAny as any).inputArea;
-          let currTag = dfmetadata.tag;
-          if (isChecked){
-            inputArea.addTag(currTag);
-          } else{
-            inputArea.addTag("");
-            dfmetadata.tag = currTag;
-            cAny.model.setMetadata('dfmetadata', dfmetadata);
-          }
+          // FIXME actually make the tag-cell buttons invisible?
+          const cellsArray = Array.from(notebook.widgets);
+          cellsArray.forEach(cAny => {
+            const dfmetadata = cAny.model.getMetadata('dfmetadata');
+            if (cAny.model.type == 'code' && dfmetadata.tag){
+              const inputArea = (cAny as any).inputArea;
+              let currTag = dfmetadata.tag;
+              if (tagsEnabled){
+                inputArea.addTag(currTag);
+              } else {
+                inputArea.addTag("");
+                dfmetadata.tag = currTag;
+                cAny.model.setMetadata('dfmetadata', dfmetadata);
+              }
+            }
+          });
+          current.model?.setMetadata("enable_tags", tagsEnabled);
+          app.commands.notifyCommandChanged(CommandIDs.setCellName);
+          app.commands.notifyCommandChanged(CommandIDs.toggleTagsCmd);
+          const nbPanel = tracker.currentWidget;
+          updateNotebookCellsWithTag(nbPanel.model as DataflowNotebookModel, "", nbPanel.sessionContext,false, false, true);
         }
-      });
-
-      nbPanel.model?.setMetadata("enable_tags", isChecked);
-      app.commands.notifyCommandChanged('toolbar-button:set-cell-name')
-      await updateNotebookCellsWithTag(nbPanel.model as DataflowNotebookModel, "", nbPanel.sessionContext, !isChecked);
+      },
+      isEnabled: args => (tracker.currentWidget ? true : false),
+      icon: args => {
+        const current = tracker.currentWidget;
+        let tagsEnabled = true;
+        if (current) {
+          tagsEnabled = current?.model?.getMetadata("enable_tags") ?? true;
+        } else {
+          tagsEnabled = false;
+        }
+        return tagsEnabled ? tagOffIcon : tagIcon;
+      },
     });
 
-    this.node.appendChild(containerDiv);
+    app.commands.addCommand(CommandIDs.toggleReactiveCmd, {
+      label: 'Toggle Reactive Mode',
+      caption: 'Toggle Reactive Mode',
+      execute: args => {
+        const current = tracker.currentWidget;
+        if (current) {
+          const notebook = current.content;
+          let reactiveEnabled = notebook.model?.getMetadata("enable_reactive") ?? true;
+          reactiveEnabled = !reactiveEnabled;
+          // FIXME make the reactive-cell buttons invisible?
+          current.model?.setMetadata("enable_reactive", reactiveEnabled);
+          app.commands.notifyCommandChanged(CommandIDs.toggleReactiveCmd);
+        }
+      },
+      icon: args => {
+        const current = tracker.currentWidget;
+        let reactiveEnabled = true;
+        if (current) {
+          reactiveEnabled = current?.model?.getMetadata("enable_reactive") ?? true;
+        } else {
+          reactiveEnabled = false;
+        }
+        return reactiveEnabled ? nonReactiveIcon : reactiveIcon;
+      }
+    });    
   }
 }
 
-/**
- * Adds Tags toggle switch in frontend toolbar for dfkernels notebooks 
- */
-const ToggleCellNames: JupyterFrontEndPlugin<void> = {
-  id: 'toggle-cell-names',
-  autoStart: true,
-  requires: [INotebookTracker],
-  activate: (app: JupyterFrontEnd, nbTrackers: INotebookTracker) => {
-    nbTrackers.widgetAdded.connect((sender,nbPanel) => {
-      const session = nbPanel.sessionContext;
-        session.ready.then(async () => {
-          if(session.session?.kernel?.name == 'dfpython3'){
-            const toggleSwitch = new ToggleCellNamesWidget(nbPanel, app);        
-            nbPanel.toolbar.insertItem(12, 'customToggleTag', toggleSwitch);
-          }
-        });
-     });
-  }
-};
 
 const plugins: JupyterFrontEndPlugin<any>[] = [
   cellExecutor,
@@ -771,10 +780,10 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   widgetFactoryPlugin,
   trackerPlugin,
   cellToolbar,
+  panelToolbar,
   DepViewer,
   MiniMap,
-  GraphManagerPlugin,
-  ToggleCellNames,
+  GraphManagerPlugin
 ];
 export default plugins;
 
@@ -1428,6 +1437,7 @@ function addCommands(
     commands.notifyCommandChanged(CommandIDs.moveUp);
     commands.notifyCommandChanged(CommandIDs.moveDown);
     commands.notifyCommandChanged(CommandIDs.setCellName);
+    commands.notifyCommandChanged(CommandIDs.reactiveCodeCell);
   });
 
   commands.addCommand(CommandIDs.runAndAdvance, {
@@ -2970,6 +2980,35 @@ function addCommands(
     icon: args => (args.toolbar ? tagIcon : undefined)
   });
 
+  commands.addCommand(CommandIDs.reactiveCodeCell, {
+    label: trans.__('Reactive'),
+    caption: trans.__('Reactive'),
+    execute: args => {
+      const cell = tracker.currentWidget?.content.activeCell as CodeCell;
+      const metadata = cell.model.getMetadata('dfmetadata');
+      metadata.isReactive = !metadata.isReactive;
+      cell.model.setMetadata('dfmetadata', metadata);
+      commands.notifyCommandChanged('toolbar-button:reactive-cell')
+    },
+    isEnabled: () => {
+      const isDfnotebook = tracker.currentWidget?.model?.getMetadata('dfnotebook')
+      const reactiveModeOn = tracker.currentWidget?.model?.getMetadata('enable_reactive');
+      return isDfnotebook && reactiveModeOn;
+    },
+    isVisible: () => {
+      const isDfnotebook = tracker.currentWidget?.model?.getMetadata('dfnotebook')
+      return isDfnotebook;
+    },
+    icon: args => {
+      if (!args.toolbar) return undefined;
+      const cell = tracker.currentWidget?.content.activeCell as CodeCell;
+      const metadata = cell.model.getMetadata('dfmetadata');
+
+      // assume reactive unless otherwise indicated
+      return metadata?.isReactive ?? true ? nonReactiveIcon : reactiveIcon;
+    }
+  });
+
   // !!! END DATAFLOW NOTEBOOK CHANGE !!!
 }
 
@@ -3149,7 +3188,8 @@ function populatePalette(
     CommandIDs.setSideBySideRatio,
     CommandIDs.enableOutputScrolling,
     CommandIDs.disableOutputScrolling,
-    CommandIDs.setCellName
+    CommandIDs.setCellName,
+    CommandIDs.reactiveCodeCell
   ].forEach(command => {
     palette.addItem({ command, category });
   });
