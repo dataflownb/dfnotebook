@@ -40,8 +40,8 @@
     ],
     "Notebook": [
       {
-          "name": "toggle-tags",
-          "command": "dfnotebook:toggle-tags",
+          "name": "toggle-cell-names",
+          "command": "dfnotebook:toggle-cell-names",
           "rank": 510
       },
       {
