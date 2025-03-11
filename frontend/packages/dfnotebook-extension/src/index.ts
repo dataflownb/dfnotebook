@@ -2954,8 +2954,8 @@ function addCommands(
   });
 
   commands.addCommand(CommandIDs.setCellName, {
-    label: 'Cell Name',
-    caption: 'Cell Name',
+    label: 'Set Cell Name',
+    caption: 'Set Cell Name',
     execute: args => {
       const cell = tracker.currentWidget?.content.activeCell as CodeCell;
       const inputArea = cell.inputArea as DataflowInputArea;
