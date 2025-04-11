@@ -20,17 +20,26 @@ class DataflowInvalidRefError(DataflowCellException):
         return "Invalid Reference to Cell '{}'".format(self.cid)
 
 class DataflowHistoryManager(object):
-    deleted_cells = []
-    storeditems = []
-    tup_flag = False
-
     def __init__(self, shell, **kwargs):
         self.shell = shell
         self.flags = dict(kwargs)
         self.auto_update_flags = {}
         self.force_cached_flags = {}
-        # self.flags['silent'] = True
+        self.deleted_cells = []
+        self.storeditems = []
         self.clear()
+
+    def clear(self):
+        self.func_cached = {}
+        self.code_cache = {}
+        self.code_stale = {}
+        self.value_cache = {}
+        self.last_calculated = {}
+        # dependencies are a DAG
+        self.dep_parents = defaultdict(set) # child -> list(parent)
+        self.dep_children = defaultdict(set) # parent -> list(child)
+        self.dep_semantic_parents = defaultdict(dict)
+        self.last_calculated_ctr = 0
 
     def update_flags(self, **kwargs):
         self.flags.update(kwargs)
@@ -97,18 +106,6 @@ class DataflowHistoryManager(object):
 
     def sorted_keys(self):
         return (k2 for (v2, k2) in sorted((v, k) for (k, v) in self.last_calculated.items()))
-
-    def clear(self):
-        self.func_cached = {}
-        self.code_cache = {}
-        self.code_stale = {}
-        self.value_cache = {}
-        self.last_calculated = {}
-        # dependencies are a DAG
-        self.dep_parents = defaultdict(set) # child -> list(parent)
-        self.dep_children = defaultdict(set) # parent -> list(child)
-        self.dep_semantic_parents = defaultdict(dict)
-        self.last_calculated_ctr = 0
 
     def update_dependencies(self, parent, child):
         self.storeditems.append({'parent':parent, 'child':child})
