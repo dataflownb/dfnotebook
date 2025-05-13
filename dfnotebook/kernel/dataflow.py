@@ -39,7 +39,7 @@ class DataflowHistoryManager(object):
     def update_code(self, key, code):        
         # print("CALLING UPDATE CODE", key, code)
         # if code is empty, remove the code_cache, remove links
-        if code == '' and key in self.value_cache:
+        if code == '' and key in self.value_cache and key in self.code_cache:
             self.set_stale(key)
             del self.value_cache[key]
             del self.code_cache[key]

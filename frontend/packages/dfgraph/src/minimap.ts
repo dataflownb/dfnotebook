@@ -169,7 +169,7 @@ export class Minimap {
     let that = this;
     let ups: any = [];
     let downs: any = [];
-    if (!node.classed('active_node')) {
+    if (!node.empty() && !node.classed('active_node')) {
       this.reset();
       node.classed('active_node', true);
       parent.classed('active', true);
@@ -779,7 +779,8 @@ export class Minimap {
 
   /** @method clear graph */
   clearMinimap = function () {
-    $('#minisvg g').empty();
+    d3.select('#minisvg').selectAll('*').remove();
+    this.svg = null
   };
 
   /** @method updates the list of output tags on the graph */
@@ -795,6 +796,10 @@ export class Minimap {
   /** @method starts minimap creation, this is the process that's ran every time **/
   startMinimapCreation = function () {
     if (this.updateCells() && this.updateOutputTags() && this.updateEdges()) {
+      if (!this.svg || d3.select('#minisvg').empty()) {
+        this.svg = d3.select('#minisvg').append('g');
+        this.svg.attr('transform', 'translate(0,0)');
+      }
       let that = this;
       that.createMinimap();
     }
