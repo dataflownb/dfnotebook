@@ -24,7 +24,8 @@ import {
   showDialog,
   MainAreaWidget,
   ToolbarButton,
-  Toolbar
+  Toolbar,
+  showErrorMessage
 } from '@jupyterlab/apputils';
 import { Graph, Manager as GraphManager, ViewerWidget } from '@dfnotebook/dfgraph';
 import { Cell, CodeCell, ICellModel, ICodeCellModel, MarkdownCell } from '@jupyterlab/cells';
@@ -82,7 +83,7 @@ import {
   UUID
 } from '@lumino/coreutils';
 import { DisposableSet } from '@lumino/disposable';
-import { Panel } from '@lumino/widgets';
+import { Menu, Panel } from '@lumino/widgets';
 
 import {
   DataflowNotebookModel,
@@ -810,6 +811,97 @@ const NotebookCellTrackerPlugin: JupyterFrontEndPlugin<void> = {
   }
 };
 
+/**
+ * Add export as ipykernel notebook format option
+ */
+const ExportIpykernelNB: JupyterFrontEndPlugin<void> = {
+  id: 'export-as-ipykernel-notebook',
+  autoStart: true,
+  requires: [IMainMenu, INotebookTracker],
+  activate: (
+    app: JupyterFrontEnd,
+    mainMenu: IMainMenu,
+    notebookTracker: INotebookTracker,
+    labShell: ILabShell
+  ) => {
+    const { commands } = app;
+    const command = 'notebook:export-as-ipykernel-notebook';
+
+    commands.addCommand(command, {
+      label: 'Ipykernel notebook',
+      execute: async () => {
+        const notebook = notebookTracker.currentWidget;
+        if (notebook) {
+          await exportnb(notebook);
+        }
+      },
+      isEnabled: () => {
+        const currentWidget = app.shell.currentWidget;
+        if (
+          currentWidget &&
+          notebookTracker.has(currentWidget) &&
+          currentWidget instanceof NotebookPanel
+        ) {
+          const kernelName = currentWidget.sessionContext.session?.kernel?.name;
+          return kernelName === 'dfpython3';
+        }
+        return false;
+      }
+    });
+
+    labShell?.currentChanged.connect(() => {
+      commands.notifyCommandChanged(command);
+    });
+
+    function createMenuItem(): Menu.IItemOptions {
+      return { command };
+    }
+
+    app.restored.then(() => {
+      const fileMenu = mainMenu.fileMenu;
+      const saveAsMenuItem = fileMenu.items.find(
+        item => item.type === 'submenu' && item.label === 'Save and Export Notebook As'
+      );
+
+      if (saveAsMenuItem && saveAsMenuItem.submenu) {
+        saveAsMenuItem.submenu.addItem(createMenuItem());
+      } else {
+        console.warn('Save and Export Notebook As - submenu not found');
+      }
+    });
+
+    async function exportnb(nbPanel: NotebookPanel) {
+      const notebook = app.shell.currentWidget as NotebookPanel;
+      if (notebook) {
+        const clonedModel = JSON.parse(JSON.stringify(notebook.model?.toJSON()));
+        const kernel = nbPanel.sessionContext.session?.kernel;
+        if (kernel) {
+          let comm = kernel.createComm('dfconvert');
+          comm.open();
+          comm.send({ 'notebook': clonedModel });
+          comm.onMsg = (msg: any) => {
+            const updated_notebook = msg.content.data.notebook;
+            if (!updated_notebook || Object.keys(updated_notebook).length === 0) {
+              showErrorMessage(
+                'Export Failed',
+                'The notebook export was unsuccessful. Please reload the page and try again, or check cells for any issues.'
+              );
+              return;
+            }
+            const data = new Blob([JSON.stringify(updated_notebook)], { type: 'application/json' });
+            const notebookName = notebook.context.localPath.split('/').pop()?.slice(0, -6);
+            const url = URL.createObjectURL(data);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = notebookName + '_ipy.ipynb';
+            link.click();
+          };
+        }
+      }
+    }
+  }
+};
+
 const plugins: JupyterFrontEndPlugin<any>[] = [
   cellExecutor,
   factory,
@@ -820,6 +912,7 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   MiniMap,
   GraphManagerPlugin,
   ToggleTags,
+  ExportIpykernelNB,
   NotebookCellTrackerPlugin
 ];
 export default plugins;

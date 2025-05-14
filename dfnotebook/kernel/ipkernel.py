@@ -31,7 +31,8 @@ from dfnbutils import (
     ref_replacer,
     identifier_replacer,
     dollar_replacer,
-    get_references
+    get_references,
+    convert_notebook
 )
 
 
@@ -56,6 +57,7 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
             self.execution_count, 16
         )
         get_ipython().kernel.comm_manager.register_target('dfcode', self.dfcode_comm)
+        get_ipython().kernel.comm_manager.register_target('dfconvert', self.dfconvert_comm)
         
         # # first use nest_ayncio for nested async, then add asyncio.Future to tornado
         # nest_asyncio.apply()
@@ -86,7 +88,18 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
     #
     #     super()._publish_execute_input(code, parent, execution_count)
 
-    
+    def dfconvert_comm(self, comm, msg):
+        @comm.on_msg
+        def _recv(msg):
+            try:
+                updated_notebook = convert_notebook(msg['content']['data']['notebook'])
+                comm.send({'notebook': updated_notebook})
+            except Exception as e:
+                self.log.error('Error in conversion')
+                self.log.error(e)
+            finally:
+                comm.close()
+
     def dfcode_comm(self, comm, msg):
         @comm.on_msg
         def _recv(msg):
