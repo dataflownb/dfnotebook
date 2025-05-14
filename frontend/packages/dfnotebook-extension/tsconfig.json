@@ -21,6 +21,10 @@
     {
       "path": "../dfgraph",
       "composite": true
+    },
+    {
+      "path": "../dfeditor",
+      "composite": true
     }
   ]
 }

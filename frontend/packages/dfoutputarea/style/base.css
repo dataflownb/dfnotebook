@@ -9,4 +9,10 @@
 
 .jp-OutputArea-promptOverlay {
   --jp-cell-prompt-width: var(--df-cell-prompt-width);
+  z-index: 0;
+}
+
+.dataflow-output-tag {
+  position: relative;
+  z-index: 100;
 }

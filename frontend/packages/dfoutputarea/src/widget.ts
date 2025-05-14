@@ -11,6 +11,7 @@ import * as nbformat from '@jupyterlab/nbformat';
 import { JSONObject } from '@lumino/coreutils';
 import { Panel, Widget } from '@lumino/widgets';
 import { cellIdIntToStr } from '@dfnotebook/dfutils';
+import { DfEditorContextMenu } from '@dfnotebook/dfeditor';
 
 
 export interface IStreamWithExecCountMsg extends KernelMessage.IStreamMsg {
@@ -136,7 +137,10 @@ export class DataflowOutputArea extends OutputArea {
 export class DataflowOutputPrompt extends OutputPrompt {
   updatePrompt() {
     if (this._outputTag) {
-      this.node.textContent = `${this._outputTag}:`;
+      this.node.textContent = "";
+      this._tagSpan = this._createTagSpan();
+      this._tagSpan.textContent = `${this._outputTag}:`;
+      this.node.append(this._tagSpan);
     } else if (this.executionCount === null) {
       this.node.textContent = '';
     } else {
@@ -144,6 +148,16 @@ export class DataflowOutputPrompt extends OutputPrompt {
       // .substr(0, 3);
       this.node.textContent = `[${cellId}]:`;
     }
+  }
+
+  private _createTagSpan(): HTMLSpanElement {
+    const tagSpan = document.createElement('span');
+    tagSpan.className = 'dataflow-output-tag';
+    tagSpan.style.cursor = 'pointer';
+    tagSpan.addEventListener('mouseover', this._onMouseOver);
+    tagSpan.addEventListener('mouseout', this._onMouseOut);
+    tagSpan.addEventListener('click', this._onClick);
+    return tagSpan;
   }
 
   get executionCount(): nbformat.ExecutionCount {
@@ -163,7 +177,25 @@ export class DataflowOutputPrompt extends OutputPrompt {
     this.updatePrompt();
   }
 
+  private _onMouseOver = () => {
+    if (this._tagSpan) {
+      this._tagSpan.style.color = '#0A31FF';
+    }
+  };
+
+  private _onMouseOut = () => {
+    if (this._tagSpan) {
+      this._tagSpan.style.color = ''; // Reset to default color
+    }
+  };
+
+  private _onClick = (event: MouseEvent) => {
+    event.stopPropagation(); // Prevent the default collapse/expand behavior
+    DfEditorContextMenu(event, this._outputTag, "local")
+  };
+
   private _outputTag: string = '';
+  private _tagSpan: HTMLSpanElement;
 }
 
 export namespace DataflowOutputArea {

@@ -101,6 +101,7 @@ import { DataflowCodeCell, DataflowInputArea, getNotebookId, notebookCellMap } f
 import { cellExecutor } from './cellexecutor';
 import { CellBarExtension } from '@jupyterlab/cell-toolbar';
 import { Widget } from '@lumino/widgets';
+import { dfeditorPlugin } from '@dfnotebook/dfeditor';
 import tagSvgstr from '../style/tag.svg';
 
 export const tagIcon = new LabIcon({
@@ -820,6 +821,7 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   MiniMap,
   GraphManagerPlugin,
   ToggleTags,
+  dfeditorPlugin,
   NotebookCellTrackerPlugin
 ];
 export default plugins;
