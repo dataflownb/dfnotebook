@@ -148,7 +148,8 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         self._outer_dfkernel_data = dfkernel_data
         self._identifier_refs = {}
         self._persistent_code = {}
-
+        self._expectedUUID = dfkernel_data.get("expectedUUID")
+        
         res = await self.inner_execute_request(
             code,
             dfkernel_data.get("uuid"),
@@ -422,6 +423,8 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
             reply_content["status"] = "ok"
 
             if hasattr(res, "nodes"):
+                reply_content["expected_UUID"] = self._expectedUUID
+                reply_content["executed_cell_uuid"] = uuid
                 reply_content["nodes"] = res.nodes
                 reply_content["links"] = res.links
                 reply_content["cells"] = res.cells

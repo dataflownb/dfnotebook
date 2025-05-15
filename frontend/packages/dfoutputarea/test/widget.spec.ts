@@ -69,7 +69,7 @@ describe('outputarea/widget', () => {
       values: DEFAULT_OUTPUTS,
       trusted: true
     });
-    widget = new LogOutputArea({ rendermime, model }, 'cellId');
+    widget = new LogOutputArea({ rendermime, model }, '000aaa');
   });
 
   afterEach(() => {
@@ -350,7 +350,7 @@ describe('outputarea/widget', () => {
         mockdata['uuid'] = uuid;
         mockdata['code_dict'] = code_dict;
         mockmap[uuid] = widget;
-        const reply = await OutputArea.execute(CODE, widget, sessionContext,metadata,mockdata,mockmap);
+        const reply = await OutputArea.execute(CODE, widget, sessionContext,metadata,mockdata,mockmap,uuid);
         expect(reply!.content.execution_count).toBeTruthy();
         expect(reply!.content.status).toBe('ok');
         
@@ -369,18 +369,18 @@ describe('outputarea/widget', () => {
         mockdata['uuid'] = uuid;
         mockdata['code_dict'] = code_dict;
         mockmap[uuid] = widget;
-        const reply = await OutputArea.execute(CODE, widget, sessionContext,metadata,mockdata,mockmap);
+        const reply = await OutputArea.execute(CODE, widget, sessionContext,metadata,mockdata,mockmap,uuid);
         expect(reply!.content.execution_count).toBeTruthy();
         expect(model.length).toBe(0);
       });
 
       it('should handle routing of display messages', async () => {
         const model0 = new OutputAreaModel({ trusted: true });
-        const widget0 = new LogOutputArea({ rendermime, model: model0 }, 'aaaaaaaa');
+        const widget0 = new LogOutputArea({ rendermime, model: model0 }, 'aaaaaaa1');
         const model1 = new OutputAreaModel({ trusted: true });
-        const widget1 = new LogOutputArea({ rendermime, model: model1 }, 'bbbbbbbb');
+        const widget1 = new LogOutputArea({ rendermime, model: model1 }, 'bbbbbbb1');
         const model2 = new OutputAreaModel({ trusted: true });
-        const widget2 = new LogOutputArea({ rendermime, model: model2 }, 'cccccccc');
+        const widget2 = new LogOutputArea({ rendermime, model: model2 }, 'ccccccc1');
 
         const code0 = [
           'ip = get_ipython()',
@@ -413,16 +413,16 @@ describe('outputarea/widget', () => {
         code_dict[uuid] = code0;
         mockdata['uuid'] = uuid;
         mockdata['code_dict'] = code_dict;
-        mockmap[uuid] = widget;
+        mockmap[uuid] = widget0;
 
-        const promise0 = OutputArea.execute(code0, widget0, ipySessionContext,{},mockdata,mockmap);
+        const promise0 = OutputArea.execute(code0, widget0, ipySessionContext,{},mockdata,mockmap,uuid);
         uuid = String(widget1.cellId);
         mockdata['uuid'] = uuid;
         code_dict[uuid] = code1;
         mockdata['code_dict'] = code_dict;
         metadata['cellId'] = uuid;
         mockmap[uuid] = widget1;
-        const promise1 = OutputArea.execute(code1, widget1, ipySessionContext,{},mockdata,mockmap);
+        const promise1 = OutputArea.execute(code1, widget1, ipySessionContext,{},mockdata,mockmap,uuid);
         await Promise.all([promise0, promise1]);
         expect(model1.length).toBe(1);
         const outputs2 = model1.toJSON();
@@ -434,7 +434,7 @@ describe('outputarea/widget', () => {
         mockdata['code_dict'] = code_dict;
         metadata['cellId'] = uuid;
         mockmap[uuid] = widget2;
-        await OutputArea.execute(code2, widget2, ipySessionContext,metadata,mockdata,mockmap);
+        await OutputArea.execute(code2, widget2, ipySessionContext,metadata,mockdata,mockmap,uuid);
         
         expect(model1.length).toBe(1);
         expect(model2.length).toBe(3);
@@ -454,7 +454,7 @@ describe('outputarea/widget', () => {
           {'kernelPreference':
           {'name':'dfpython3','autoStartDefault':true,'shouldStart':true}});
         await ipySessionContext.initialize();
-        const widget1 = new LogOutputArea({ rendermime, model }, 'cellId');
+        const widget1 = new LogOutputArea({ rendermime, model }, 'aaaaaaa1');
         let uuid = widget1.cellId;
         let metadata: any = {};
         let code_dict: any = {};
@@ -465,13 +465,13 @@ describe('outputarea/widget', () => {
         mockdata['uuid'] = uuid;
         mockdata['code_dict'] = code_dict;
         mockmap[uuid] = widget;
-        const future1 = OutputArea.execute('a++1', widget, ipySessionContext,metadata,mockdata,mockmap);
+        const future1 = OutputArea.execute('a++1', widget, ipySessionContext,metadata,mockdata,mockmap,uuid);
         uuid = String(widget1.cellId);
         mockdata['uuid'] = uuid;
         code_dict[uuid] = 'a=1';
         mockdata['code_dict'] = code_dict;
         metadata['cellId'] = uuid;
-        const future2 = OutputArea.execute('a=1', widget1, ipySessionContext,metadata,mockdata,mockmap);
+        const future2 = OutputArea.execute('a=1', widget1, ipySessionContext,metadata,mockdata,mockmap,uuid);
         const reply = await future1;
         const reply2 = await future2;
         expect(reply!.content.status).toBe('error');
@@ -487,7 +487,7 @@ describe('outputarea/widget', () => {
           {'kernelPreference':
           {'name':'dfpython3','autoStartDefault':true,'shouldStart':true}});
         await ipySessionContext.initialize();
-        const widget1 = new LogOutputArea({ rendermime, model }, 'cellId');
+        const widget1 = new LogOutputArea({ rendermime, model }, 'aaaaaaa1');
         let uuid = widget1.cellId;
         let metadata: any = {};
         let code_dict: any = {};
@@ -504,14 +504,15 @@ describe('outputarea/widget', () => {
           ipySessionContext,
           metadata,
           mockdata,
-          mockmap
+          mockmap,
+          uuid
         );
         uuid = String(widget1.cellId);
         mockdata['uuid'] = uuid;
         code_dict[uuid] = 'a=1';
         mockdata['code_dict'] = code_dict;
         metadata['cellId'] = uuid;
-        const future2 = OutputArea.execute('a=1', widget1, ipySessionContext,metadata,mockdata,mockmap);
+        const future2 = OutputArea.execute('a=1', widget1, ipySessionContext,metadata,mockdata,mockmap,uuid);
         const reply = await future1;
         const reply2 = await future2;
         expect(reply!.content.status).toBe('error');
