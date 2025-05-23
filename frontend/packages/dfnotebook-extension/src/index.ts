@@ -295,11 +295,11 @@ namespace CommandIDs {
 
   export const tocRunCells = 'toc:run-cells';
 
-  export const addCellTag = 'notebook:add-cell-tag';
+  export const addCellName = 'notebook:add-cell-name';
 
-  export const modifyCellTag = 'notebook:modify-cell-tag';
+  export const modifyCellName = 'notebook:modify-cell-name';
 
-  export const tagCodeCell = 'toolbar-button:tag-cell';
+  export const setCellName = 'toolbar-button:set-cell-name';
 }
 
 /**
@@ -675,9 +675,9 @@ const cellToolbar: JupyterFrontEndPlugin<void> = {
 };
 
 /**
- * Creates the toggle switch used for hiding/showing tags
+ * Creates the toggle switch used for hiding/showing cell names
  */
-class ToggleTagsWidget extends Widget {
+class ToggleCellNamesWidget extends Widget {
   constructor(nbPanel: NotebookPanel, app: JupyterFrontEnd) {
     super();
     this.addClass('jupyter-toggle-switch-widget');
@@ -706,7 +706,7 @@ class ToggleTagsWidget extends Widget {
     containerDiv.appendChild(label);
 
     const updateTooltip = (isChecked: boolean) => {
-      const tooltipText = isChecked ? `Toggle to hide the tags in the notebook`: `Toggle to show the tags in the notebook`;
+      const tooltipText = isChecked ? `Toggle to hide cell names in the notebook`: `Toggle to show cell names in the notebook`;
       label.title = tooltipText;
       labelText.title = tooltipText;
       slider.title = tooltipText;
@@ -737,7 +737,7 @@ class ToggleTagsWidget extends Widget {
       });
 
       nbPanel.model?.setMetadata("enable_tags", isChecked);
-      app.commands.notifyCommandChanged('toolbar-button:tag-cell')
+      app.commands.notifyCommandChanged('toolbar-button:set-cell-name')
       await updateNotebookCellsWithTag(nbPanel.model as DataflowNotebookModel, "", nbPanel.sessionContext, !isChecked);
     });
 
@@ -748,8 +748,8 @@ class ToggleTagsWidget extends Widget {
 /**
  * Adds Tags toggle switch in frontend toolbar for dfkernels notebooks 
  */
-const ToggleTags: JupyterFrontEndPlugin<void> = {
-  id: 'toggle-tags',
+const ToggleCellNames: JupyterFrontEndPlugin<void> = {
+  id: 'toggle-cell-names',
   autoStart: true,
   requires: [INotebookTracker],
   activate: (app: JupyterFrontEnd, nbTrackers: INotebookTracker) => {
@@ -757,7 +757,7 @@ const ToggleTags: JupyterFrontEndPlugin<void> = {
       const session = nbPanel.sessionContext;
         session.ready.then(async () => {
           if(session.session?.kernel?.name == 'dfpython3'){
-            const toggleSwitch = new ToggleTagsWidget(nbPanel, app);        
+            const toggleSwitch = new ToggleCellNamesWidget(nbPanel, app);        
             nbPanel.toolbar.insertItem(12, 'customToggleTag', toggleSwitch);
           }
         });
@@ -774,7 +774,7 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   DepViewer,
   MiniMap,
   GraphManagerPlugin,
-  ToggleTags
+  ToggleCellNames,
 ];
 export default plugins;
 
@@ -1427,7 +1427,7 @@ function addCommands(
   tracker.activeCellChanged.connect(() => {
     commands.notifyCommandChanged(CommandIDs.moveUp);
     commands.notifyCommandChanged(CommandIDs.moveDown);
-    commands.notifyCommandChanged(CommandIDs.tagCodeCell);
+    commands.notifyCommandChanged(CommandIDs.setCellName);
   });
 
   commands.addCommand(CommandIDs.runAndAdvance, {
@@ -2663,8 +2663,8 @@ function addCommands(
     }
   });
 
-  commands.addCommand(CommandIDs.addCellTag, {
-    label: 'Add Cell Tag',
+  commands.addCommand(CommandIDs.addCellName, {
+    label: 'Add Cell Name',
     execute: async args => {
       const cell = tracker.currentWidget?.content.activeCell as CodeCell;
       if (cell == null) {
@@ -2718,7 +2718,7 @@ function addCommands(
         widgetNode.node.appendChild(dialogNode);
   
         const result = await showDialog({
-          title: 'Add Cell Tag',
+          title: 'Add Cell Name',
           body: widgetNode,
           buttons: [
             Dialog.cancelButton(),
@@ -2730,13 +2730,13 @@ function addCommands(
         if (result.button.accept) {
           const newTag = (dialogNode.querySelector('input[name="tag-name"]') as HTMLInputElement).value;
           if (newTag.trim() === '') {
-            return await showAddTagDialog('Tag cannot be empty or whitespace. Enter a valid tag.');
+            return await showAddTagDialog('Name cannot be empty or whitespace. Enter a valid name.');
           } else if (!pythonVarRegexp.test(newTag)) {
-            return await showAddTagDialog('Invalid name (follow python identifier rules). Enter a valid tag.');
+            return await showAddTagDialog('Invalid name (follow python identifier rules). Enter a valid name.');
           } else if (hexRegexp.test(newTag)) {
-            return await showAddTagDialog('Cell tags cannot be 8 hex values. Enter a valid tag.');
+            return await showAddTagDialog('Cell names cannot be 8 hex values. Enter a valid name.');
           } else if (existingCellTags.has(newTag)){
-            return await showAddTagDialog('This tag already exists. Enter a different tag.');
+            return await showAddTagDialog('This name already exists. Enter a different name.');
           } else {
             return { newTag };
           }
@@ -2770,8 +2770,8 @@ function addCommands(
     }
   });
   
-  commands.addCommand(CommandIDs.modifyCellTag, {
-    label: 'Modify Cell Tag',
+  commands.addCommand(CommandIDs.modifyCellName, {
+    label: 'Modify Cell Name',
     execute: async args => {
       const cell = tracker.currentWidget?.content.activeCell as CodeCell;
       const existingCellTags = new Set();
@@ -2848,7 +2848,7 @@ function addCommands(
         widgetNode.node.appendChild(dialogNode);
         
         const result = await showDialog({
-          title: 'Modify Cell Tag',
+          title: 'Modify Cell Name',
           body: widgetNode,
           buttons: [
             Dialog.cancelButton(),
@@ -2868,13 +2868,13 @@ function addCommands(
           }
 
           if (newTag.trim() === '') {
-            return await showModifyTagDialog('Tag cannot be empty or whitespace. Enter a valid tag.');
+            return await showModifyTagDialog('Name cannot be empty or whitespace. Enter a valid name.');
           } else if (!pythonVarRegexp.test(newTag)) {
-            return await showModifyTagDialog('Invalid name (follow python identifier rules). Enter a valid tag.');
+            return await showModifyTagDialog('Invalid name (follow python identifier rules). Enter a valid name.');
           } else if (hexRegexp.test(newTag)) {
-            return await showModifyTagDialog('Cell tags cannot be 8 hex values. Enter a valid tag.');
+            return await showModifyTagDialog('Cell names cannot be 8 hex values. Enter a valid name.');
           } else if (existingCellTags.has(newTag)){
-            return await showModifyTagDialog('This tag already exists. Enter a different tag.');
+            return await showModifyTagDialog('This name already exists. Enter a different name.');
           } else {
             return { newTag, updateReferences };
           }
@@ -2944,17 +2944,17 @@ function addCommands(
     }
   });
 
-  commands.addCommand(CommandIDs.tagCodeCell, {
-    label: trans.__('Tag'),
-    caption: trans.__('Tag'),
+  commands.addCommand(CommandIDs.setCellName, {
+    label: 'Cell Name',
+    caption: 'Cell Name',
     execute: args => {
       const cell = tracker.currentWidget?.content.activeCell as CodeCell;
       const inputArea = cell.inputArea as DataflowInputArea;
       if(cell && inputArea && inputArea.tag){
-        commands.execute('notebook:modify-cell-tag');
+        commands.execute('notebook:modify-cell-name');
       }
       else{
-        commands.execute('notebook:add-cell-tag');
+        commands.execute('notebook:add-cell-name');
       }
     },
     isEnabled: () => {
@@ -3149,7 +3149,7 @@ function populatePalette(
     CommandIDs.setSideBySideRatio,
     CommandIDs.enableOutputScrolling,
     CommandIDs.disableOutputScrolling,
-    CommandIDs.tagCodeCell
+    CommandIDs.setCellName
   ].forEach(command => {
     palette.addItem({ command, category });
   });
