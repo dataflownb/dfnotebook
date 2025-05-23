@@ -127,7 +127,8 @@ function setDFMetadata(cell: CodeCell) {
       tag: "",
       inputVars: { ref: {}, tag_refs: {} },
       outputVars: [],
-      persistentCode: ""
+      persistentCode: "",
+      isReactive: true
     };
     cell.model.setMetadata('dfmetadata', dfmetadata);
   }
