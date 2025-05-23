@@ -944,7 +944,7 @@ describe('cells/widget', () => {
           placeholder: false
         });
         widget.initializeState();
-        let uuid = String(widget.model.executionCount);
+        let uuid = truncateCellId(widget.model.id);
         let mockdata = {'uuid':uuid,'code_dict':{uuid:''}};
         let mockmap = {uuid:widget.model};
         await expect(
@@ -962,7 +962,7 @@ describe('cells/widget', () => {
         widget.initializeState();
         widget.model.sharedModel.setSource('foo = 3');
 
-        let uuid = String(widget.model.id);
+        let uuid = truncateCellId(widget.model.id);
         let mockdata = {'uuid':uuid,'code_dict':{uuid:''}};
         let mockmap = {uuid:widget.model};
         const originalexecutionCount = widget.promptNode!.textContent;
@@ -988,7 +988,7 @@ describe('cells/widget', () => {
           contentFactory,
           placeholder: false
         });
-        let uuid = String(widget.model.executionCount);
+        let uuid = truncateCellId(widget.model.id);
         let mockdata = {'uuid':uuid,'code_dict':{uuid:''}};
         let mockmap = {uuid:widget.model};
         await CodeCell.execute(widget, sessionContext,{},mockdata,mockmap);
@@ -1002,7 +1002,7 @@ describe('cells/widget', () => {
           contentFactory,
           placeholder: false
         });
-        let uuid = String(widget.model.executionCount);
+        let uuid = truncateCellId(widget.model.id);
         let mockdata = {'uuid':uuid,'code_dict':{uuid:''}};
         let mockmap = {uuid:widget.model};
         await CodeCell.execute(widget, sessionContext, { recordTiming: true },mockdata,mockmap);
@@ -1023,7 +1023,7 @@ describe('cells/widget', () => {
         widget.initializeState();
         widget.model.sharedModel.setSource('foo = 3');
         
-        let uuid = String(widget.model.id);
+        let uuid = truncateCellId(widget.model.id);
         let mockdata = {'uuid':uuid,'code_dict':{uuid:''}};
         let mockmap = {uuid:widget.model};
         const future1 = CodeCell.execute(widget, sessionContext,{},mockdata,mockmap);

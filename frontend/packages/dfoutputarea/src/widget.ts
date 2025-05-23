@@ -30,8 +30,6 @@ export interface IErrorWithExecCountMsg extends KernelMessage.IErrorMsg {
   };
 }
 
-
-
 export class DataflowOutputArea extends OutputArea {
   constructor(options: OutputArea.IOptions, cellId: string) {
     super({
@@ -173,7 +171,8 @@ export namespace DataflowOutputArea {
     sessionContext: ISessionContext,
     metadata?: JSONObject,
     dfData?: JSONObject,
-    cellIdModelMap?: { [key: string]: IOutputAreaModel }
+    cellIdModelMap?: { [key: string]: IOutputAreaModel },
+    expectedUUID?: string
   ): Promise<KernelMessage.IExecuteReplyMsg | undefined> {
     // Override the default for `stop_on_error`.
     let stopOnError = true;
@@ -188,6 +187,9 @@ export namespace DataflowOutputArea {
       // FIXME not sure if this works or not...
       dfData = {} as JSONObject;
     }
+
+    dfData['expectedUUID'] = expectedUUID ?? null; 
+
     const content: KernelMessage.IExecuteRequestMsg['content'] = {
       code,
       stop_on_error: stopOnError,
@@ -202,8 +204,30 @@ export namespace DataflowOutputArea {
     output.future = future;
 
     DataflowOutputArea.cellIdModelMap = cellIdModelMap;
+    
+    return new Promise<KernelMessage.IExecuteReplyMsg>((resolve, reject) => {
+      let handled = false;
 
-    return future.done;
+      future.onReply = (reply: KernelMessage.IExecuteReplyMsg) => {
+        if (handled) return;
+
+        const replyExecutedUUID = (reply.content as any).executed_cell_uuid;
+        const replyExpectedUUID = (reply.content as any).expected_UUID;
+        const status = (reply.content as any).status;
+    
+        if (status !== 'ok' || replyExecutedUUID === replyExpectedUUID) {
+          handled = true;
+          resolve(reply);
+        }
+      };
+
+      future.dispose = () => {
+        if (!handled) {
+          handled = true;
+          reject(new Error('Canceled'));
+        }
+      };
+    });
   }
 
   /**

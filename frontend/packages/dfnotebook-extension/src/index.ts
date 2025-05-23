@@ -27,7 +27,7 @@ import {
   Toolbar
 } from '@jupyterlab/apputils';
 import { Graph, Manager as GraphManager, ViewerWidget } from '@dfnotebook/dfgraph';
-import { Cell, CodeCell, ICellModel, ICodeCellModel, MarkdownCell } from '@jupyterlab/cells';
+import { Cell, CodeCell, CodeCellModel, ICellModel, ICodeCellModel, MarkdownCell } from '@jupyterlab/cells';
 import { IEditorServices } from '@jupyterlab/codeeditor';
 import { IEditorExtensionRegistry } from '@jupyterlab/codemirror';
 import { ToolbarItems as DocToolbarItems } from '@jupyterlab/docmanager-extension';
@@ -96,7 +96,7 @@ import {
 } from '@dfnotebook/dfnotebook';
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { IChangedArgs, PageConfig } from '@jupyterlab/coreutils';
-import { DataflowCodeCell, DataflowInputArea, getNotebookId, notebookCellMap } from '@dfnotebook/dfcells';
+import { DataflowInputArea } from '@dfnotebook/dfcells';
 
 import { cellExecutor } from './cellexecutor';
 import { CellBarExtension } from '@jupyterlab/cell-toolbar';
@@ -441,25 +441,26 @@ const GraphManagerPlugin: JupyterFrontEndPlugin<void> = {
                     GraphManager.updateOrder(cellOrder);
                 }
                 console.log(sessId);
-            });
 
-            (nbPanel.content as any).model._cells.changed.connect(() =>{
-                GraphManager.updateOrder((nbPanel.content as any).model.cells.model.cells.map((cell:any) => cell.id));
-            });
-            nbPanel.content.activeCellChanged.connect(() =>{
-                let prevActive = GraphManager.getActive();
-                if(typeof prevActive == 'object' && prevActive.id != undefined ){
-                    let uuid = truncateCellId(prevActive.id);
-                    if(prevActive.sharedModel.source != GraphManager.getText(uuid)){
-                        GraphManager.markStale(uuid);
-                    }
-                    else if(GraphManager.getStale(uuid) == 'Stale'){
-                        GraphManager.revertStale(uuid);
-                    }
-                }
-                //Have to get this off the model the same way that actions.tsx does
-                let activeId = truncateCellId(nbPanel.content.activeCell?.model?.id.replace(/-/g, '') || '');
-                GraphManager.updateActive(activeId,nbPanel.content.activeCell?.model);
+                (nbPanel.content as any).model._cells.changed.connect(() =>{
+                  GraphManager.updateOrder((nbPanel.content as any).model.cells.model.cells.map((cell:any) => cell.id));
+                });
+                
+                nbPanel.content.activeCellChanged.connect(() =>{
+                  let prevActive = GraphManager.getActive();
+                  if(typeof prevActive == 'object' && prevActive.id != undefined ){
+                      let uuid = truncateCellId(prevActive.id);
+                      if(prevActive.sharedModel.source != GraphManager.getText(uuid)){
+                          GraphManager.markStale(uuid);
+                      }
+                      else if(GraphManager.getStale(uuid) == 'Stale'){
+                          GraphManager.revertStale(uuid);
+                      }
+                  }
+                  //Have to get this off the model the same way that actions.tsx does
+                  let activeId = truncateCellId(nbPanel.content.activeCell?.model?.id.replace(/-/g, '') || '');
+                  GraphManager.updateActive(activeId,nbPanel.content.activeCell?.model);
+                });
             });
       });
 
@@ -712,7 +713,7 @@ class ToggleTagsWidget extends Widget {
     };
 
     updateTooltip(true);
-    updateNotebookCellsWithTag(nbPanel.id, nbPanel.model as DataflowNotebookModel, "", nbPanel.sessionContext);
+    updateNotebookCellsWithTag(nbPanel.model as DataflowNotebookModel, "", nbPanel.sessionContext,false, false, true);
 
     input.addEventListener('change', async (event) => {
       const isChecked = (event.target as HTMLInputElement).checked;
@@ -737,7 +738,7 @@ class ToggleTagsWidget extends Widget {
 
       nbPanel.model?.setMetadata("enable_tags", isChecked);
       app.commands.notifyCommandChanged('toolbar-button:tag-cell')
-      await updateNotebookCellsWithTag(nbPanel.id, nbPanel.model as DataflowNotebookModel, "", nbPanel.sessionContext, !isChecked);
+      await updateNotebookCellsWithTag(nbPanel.model as DataflowNotebookModel, "", nbPanel.sessionContext, !isChecked);
     });
 
     this.node.appendChild(containerDiv);
@@ -764,52 +765,6 @@ const ToggleTags: JupyterFrontEndPlugin<void> = {
   }
 };
 
-const NotebookCellTrackerPlugin: JupyterFrontEndPlugin<void> = {
-  id: 'notebook-cell-tracker',
-  autoStart: true,
-  requires: [INotebookTracker],
-  activate: (app: JupyterFrontEnd, tracker: INotebookTracker) => {
-    tracker.widgetAdded.connect((_, notebookPanel) => {
-      const notebookModel = notebookPanel.content.model;
-      
-      if (!notebookModel) {
-        console.warn('Notebook model not found.');
-        return;
-      }
-
-      const notebookId  = notebookPanel.id;
-      
-      if (!notebookCellMap.has(notebookId)) {
-        notebookCellMap.set(notebookId, new Map<string, string>());
-      }
-
-      const cellMap = notebookCellMap.get(notebookId)!;
-      notebookModel.cells.changed.connect((_, changes) => {
-        if (changes.type === 'add') {
-          for (const cell of changes.newValues) {
-            if (cell.type === 'code') {
-              const codeCell = cell as ICodeCellModel;
-              const cellId = truncateCellId(codeCell.id);
-              cellMap.set(cellId, codeCell.sharedModel.getSource());
-            }
-          }
-        }
-        else if (changes.type === 'remove') {
-          for (const deletedCellId of notebookModel.deletedCells) {
-            const cellId = truncateCellId(deletedCellId);
-            cellMap.delete(cellId);
-          }
-        }
-      });
-
-      //notebook closed
-      notebookPanel.disposed.connect(() => {
-        notebookCellMap.delete(notebookId);
-      });
-    });
-  }
-};
-
 const plugins: JupyterFrontEndPlugin<any>[] = [
   cellExecutor,
   factory,
@@ -819,8 +774,7 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   DepViewer,
   MiniMap,
   GraphManagerPlugin,
-  ToggleTags,
-  NotebookCellTrackerPlugin
+  ToggleTags
 ];
 export default plugins;
 
@@ -2792,13 +2746,12 @@ function addCommands(
   
       const result = await showAddTagDialog();
       const cellUUID = truncateCellId(cell.model.id)
-      const notebookId = getNotebookId(cell as DataflowCodeCell);
       if (result) {
         const { newTag } = result;
         inputArea.addTag(newTag);
         if (newTag && tracker.currentWidget?.content.model) {
           let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
-          await updateNotebookCellsWithTag(notebookId, notebook, cellUUID, tracker.currentWidget.sessionContext)
+          await updateNotebookCellsWithTag(notebook, cellUUID, tracker.currentWidget.sessionContext)
         }
       }
     },
@@ -2931,14 +2884,13 @@ function addCommands(
   
       const result = await showModifyTagDialog();
       const cellUUID = truncateCellId(cell.model.id);
-      const notebookId = getNotebookId(cell as DataflowCodeCell);
       if (result) {
         const { newTag, updateReferences } = result;
         inputArea.addTag(newTag);
 
         if (updateReferences && tracker.currentWidget?.content.model) {
           let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
-          await updateNotebookCellsWithTag(notebookId, notebook, cellUUID, tracker.currentWidget.sessionContext)
+          await updateNotebookCellsWithTag(notebook, cellUUID, tracker.currentWidget.sessionContext)
         } else if (updateReferences == false && tracker.currentWidget?.content.model) {
           let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
           const all_tags: { [key: string]: string } = {};
@@ -2970,7 +2922,7 @@ function addCommands(
                 }
                 dfmetadata.inputVars = { 'ref': refValue, 'tag_refs': tagRefValue };
                 notebook.cells.get(index).setMetadata('dfmetadata', dfmetadata);
-                await updateNotebookCellsWithTag(notebookId, notebook, cellUUID, tracker.currentWidget.sessionContext, false, true)
+                await updateNotebookCellsWithTag(notebook, cellUUID, tracker.currentWidget.sessionContext, false, true)
               }
             }
           }
@@ -3024,17 +2976,9 @@ function addCommands(
 /**
  * Update code based on add, delete or modified tag value
  */
-export async function updateNotebookCellsWithTag(notebookId: string|undefined, notebook: DataflowNotebookModel, cellUUID: string, sessionContext: ISessionContext, hideTags: boolean=false, updateInputTagsOnly: boolean=false) {
+export async function updateNotebookCellsWithTag(notebook: DataflowNotebookModel, cellUUID: string, sessionContext: ISessionContext, hideTags: boolean=false, updateInputTagsOnly: boolean=false, initialStart: boolean=false) {
   let dfData = getCellsMetadata(notebook, '');
-  let cellMap = notebookId ? notebookCellMap.get(notebookId): new Map<string, string>();
-  if(cellMap){
-    const executedCode: { [key: string]: string } = {};
-    cellMap.forEach((value, key) => {
-      executedCode[key] = value;
-    });
-    dfData.dfMetadata.executed_code = executedCode;
-  }
-
+  
   if (hideTags) {
     dfData.dfMetadata.input_tags = {};
   }
@@ -3045,34 +2989,46 @@ export async function updateNotebookCellsWithTag(notebookId: string|undefined, n
     dfData.dfMetadata.code_dict = {}
   }
 
+  if(initialStart){
+    const cellsArray = Array.from(notebook.cells);
+
+    cellsArray.forEach((cell, index) => {
+      if (cell.type === 'code') {
+        const cAny = cell as CodeCellModel;
+        const cId = truncateCellId(cAny.id);
+        //@ts-expect-error
+        cAny._executedCode = dfData.dfMetadata.code_dict[cId];;
+      }
+    });
+    dfData.dfMetadata.executed_code = dfData.dfMetadata.code_dict
+  }
+
   try {
     const response = await dfCommGetData(sessionContext, {'dfMetadata': dfData.dfMetadata, 'updateExecutedCode': true});
-    updateNotebookCells(notebookId, notebook, response, cellUUID, hideTags);
+    updateNotebookCells(notebook, response, cellUUID, hideTags);
   } catch (error) {
     console.error('Error occured during kernel communication', error);
   }
 }
 
-function updateNotebookCells(notebookId: string|undefined, notebook: DataflowNotebookModel, content: any, cellUUID: string, hideTags: boolean): void {
-  const cellMap = notebookId ? notebookCellMap.get(notebookId) : undefined;
+function updateNotebookCells(notebook: DataflowNotebookModel, content: any, cellUUID: string, hideTags: boolean): void {
   const all_Tags = getAllTags(notebook);
   const cellsArray = Array.from(notebook.cells);
 
   cellsArray.forEach((cell, index) => {
     if (cell.type === 'code') {
-      const cAny = cell as ICodeCellModel;
+      const cAny = cell as CodeCellModel;
       const cId = truncateCellId(cAny.id);
 
       // Handle executed code updates
       if (content.executed_code_dict?.hasOwnProperty(cId)) {
-        const updatedCode = content.executed_code_dict[cId];
-        cellMap?.set(cId, updatedCode.trim());
+        //@ts-expect-error
+        cAny._executedCode = content.executed_code_dict[cId];
       }
 
       // Handle code dictionary updates
       if (content.code_dict?.hasOwnProperty(cId)) {
-        const updatedCode = content.code_dict[cId];
-        cAny.sharedModel.setSource(updatedCode);
+        cAny.sharedModel.setSource(content.code_dict[cId]);
       }
 
       //Updating the dependent cell's df-metadata when any cell is tagged/untagged

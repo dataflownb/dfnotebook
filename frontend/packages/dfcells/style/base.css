@@ -14,19 +14,3 @@
 .jp-CodeCell.jp-mod-outputsScrolled .jp-OutputArea-prompt {
   --jp-cell-prompt-width: var(--df-cell-prompt-width);
 }
-
-.jp-Notebook .jp-Cell.jp-mod-active.jp-mod-dirty.df-cell-not-dirty .jp-Collapser{
-  background: var(--jp-brand-color1);
-}
-
-.jp-Notebook .jp-Cell.jp-mod-dirty.df-cell-not-dirty .jp-InputPrompt {
-  color: var(--jp-cell-inprompt-font-color)
-}
-
-.jp-Notebook .jp-Cell:not(.jp-mod-active).jp-mod-dirty.df-cell-not-dirty .jp-InputPrompt {
-  color: var(--jp-cell-prompt-not-active-font-color);
-}
-
-.jp-Notebook .jp-Cell.jp-mod-dirty.df-cell-not-dirty .jp-InputPrompt::before {
-  content: none;
-}

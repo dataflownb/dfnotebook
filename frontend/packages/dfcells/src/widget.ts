@@ -21,7 +21,6 @@ import { IChangedArgs } from '@jupyterlab/coreutils';
 import { ISessionContext } from '@jupyterlab/apputils';
 import { JSONObject } from '@lumino/coreutils';
 import { Panel } from '@lumino/widgets';
-import { NotebookPanel } from '@jupyterlab/notebook';
 
 // FIXME need to add this back when dfgraph is working
 import { Manager as GraphManager } from '@dfnotebook/dfgraph';
@@ -34,8 +33,6 @@ const CELL_INPUT_AREA_CLASS = 'jp-Cell-inputArea';
  * The CSS class added to the cell output area.
  */
 const CELL_OUTPUT_AREA_CLASS = 'jp-Cell-outputArea';
-
-export const notebookCellMap = new Map<string, Map<string, string>>();
 
 function setInputArea<T extends ICellModel = ICellModel>(cell: Cell) {
   // FIXME may be able to get panel via (this.layout as PanelLayout).widgets?
@@ -212,7 +209,6 @@ export class DataflowCodeCell extends CodeCell {
     super.initializeState();
     this.setPromptToId();
     setDFMetadata(this);
-    this.model.contentChanged.connect(this._onContentChanged, this);
     return this;
   }
 
@@ -226,35 +222,6 @@ export class DataflowCodeCell extends CodeCell {
         break;
     }
   }
-
-  private _onContentChanged(): void {
-    let notebookpanelId = getNotebookId(this)
-
-    if(notebookpanelId){
-      const currentCode = this.model.sharedModel.getSource().trim();
-      const cId = truncateCellId(this.model.sharedModel.getId());
-      const executedCode = notebookCellMap.get(notebookpanelId)?.get(cId)?.trim();
-      if (executedCode != ''){
-        if(executedCode === currentCode){
-          this.node.classList.add('df-cell-not-dirty');
-        }
-        else{
-          this.node.classList.remove('df-cell-not-dirty');
-        }
-      }
-    }
-  }
-}
-
-export function getNotebookId(cell: DataflowCodeCell): string|undefined {
-  let parent = cell.parent;
-    while (parent) {
-      if (parent instanceof NotebookPanel) {
-        return parent.id;
-      }
-      parent = parent.parent;
-    }
-  return undefined;
 }
 
 export namespace DataflowCodeCell {
@@ -309,7 +276,8 @@ export namespace DataflowCodeCell {
         sessionContext,
         metadata,
         dfData,
-        cellIdOutputsMap
+        cellIdOutputsMap,
+        truncateCellId(cell.model.id)
       );
 
       // cell.outputArea.future assigned synchronously in `execute`
@@ -388,31 +356,32 @@ export namespace DataflowCodeCell {
         model.setMetadata('execution', timingInfo);
       }
 
-      let content = (msg.content as any);
-      let nodes = content.nodes;
-      let uplinks = content.links;
-      let cells = content.cells;
-      let downlinks = content.imm_downstream_deps;
-      let allUps = content.upstream_deps;
-      let internalNodes = content.internal_nodes;
-      let sessId = sessionContext.session.id;
-      let graphUndefined = false;
-      
-      //Set information about the graph based on sessionid
-      if(GraphManager.graphs[sessId] === undefined){
-        GraphManager.createGraph(sessId);
-        graphUndefined = true;
-      }
-      GraphManager.graphs[sessId].updateCellContents(dfData?.code_dict);
-      GraphManager.graphs[sessId].updateGraph(cells,nodes,uplinks,downlinks,`${cell.model.id.substr(0, 8) || ''}`,allUps,internalNodes);
-      if (!graphUndefined){
-        GraphManager.updateDepViews(false);
-      }
+      if(msg && msg.content && msg.content.status === 'ok'){
+        let content = (msg.content as any);
+        let nodes = content.nodes;
+        let uplinks = content.links;
+        let cells = content.cells;
+        let downlinks = content.imm_downstream_deps;
+        let allUps = content.upstream_deps;
+        let internalNodes = content.internal_nodes;
+        let sessId = sessionContext.session.id;
+        let graphUndefined = false;
+        
+        //Set information about the graph based on sessionid
+        if(GraphManager.graphs[sessId] === undefined){
+          GraphManager.createGraph(sessId);
+          graphUndefined = true;
+        }
+        GraphManager.graphs[sessId].updateCellContents(dfData?.code_dict);
+        GraphManager.graphs[sessId].updateGraph(cells,nodes,uplinks,downlinks,`${truncateCellId(cell.model.id) || ''}`,allUps,internalNodes);
+        if (!graphUndefined){
+          GraphManager.updateDepViews(false);
+        }
 
-       if (content.update_downstreams) {
+        if (content.update_downstreams) {
           GraphManager.graphs[sessId].updateDownLinks(content.update_downstreams);
+        }
       }
-
       return msg;
     } catch (e) {
       // If we started executing, and the cell is still indicating this
