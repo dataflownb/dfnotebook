@@ -41,7 +41,7 @@ from IPython.core.completer import _FakeJediCompletion
 from ast import AST
 import importlib
 
-from .dataflow import DataflowHistoryManager, DataflowFunctionManager, \
+from .dataflow import DataflowController, DataflowFunctionManager, \
     DataflowNamespace, DataflowCellException, DataflowState, DuplicateNameError
 from .dflink import build_linked_result
 
@@ -285,7 +285,7 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
     execution_count = Integer(0)
     # UUID passed from notebook interface
     uuid = Unicode(allow_none=True)
-    dataflow_history_manager = Instance(DataflowHistoryManager)
+    df_controller = Instance(DataflowController)
     dataflow_function_manager = Instance(DataflowFunctionManager)
 
     def __init__(self, *args, **kwargs):
@@ -511,26 +511,26 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
         old_deps = []
 
         if store_history:
-            self.dataflow_history_manager.update_codes(code_dict)
-            self.dataflow_history_manager.update_auto_update(auto_update_flags)
-            self.dataflow_history_manager.update_force_cached(force_cached_flags)
+            self.df_controller.update_codes(code_dict)
+            self.df_controller.update_auto_update(auto_update_flags)
+            self.df_controller.update_force_cached(force_cached_flags)
             self.dataflow_state.add_links(output_tags)
             # also put the current cell into the cache and force recompute
             if uuid not in code_dict:
-                self.dataflow_history_manager.update_code(uuid, raw_cell)
-            if uuid in self.dataflow_history_manager.value_cache and uuid in self.dataflow_history_manager.dep_parents:
-                old_deps = self.dataflow_history_manager.all_upstream(uuid)
-                for i in list(self.dataflow_history_manager.dep_parents[uuid]):
-                    self.dataflow_history_manager.remove_dependencies(i,uuid)
-                self.dataflow_history_manager.dep_semantic_parents[uuid] = {}
-            self.dataflow_history_manager.update_flags(
+                self.df_controller.update_code(uuid, raw_cell)
+            if uuid in self.df_controller.value_cache and uuid in self.df_controller.dep_parents:
+                old_deps = self.df_controller.all_upstream(uuid)
+                for i in list(self.df_controller.dep_parents[uuid]):
+                    self.df_controller.remove_dependencies(i,uuid)
+                self.df_controller.dep_semantic_parents[uuid] = {}
+            self.df_controller.update_flags(
                 store_history=store_history,
                 silent=silent,
                 shell_futures=shell_futures,
                 update_downstream_deps=update_downstream_deps)
 
-        result_deleted_cells = self.dataflow_history_manager.deleted_cells
-        self.dataflow_history_manager.deleted_cells = []
+        result_deleted_cells = self.df_controller.deleted_cells
+        self.df_controller.deleted_cells = []
 
         #FIXME low priority possibly change how these are calculated, this can probably be moved elsewhere
         internalnodes = []
@@ -578,15 +578,15 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
         # print("LAST EXECUTE SUCCEEDED?", self.last_execution_succeeded, self.uuid, uuid, file=sys.__stdout__)
 
         if not self.last_execution_succeeded:
-            for j in self.dataflow_history_manager.storeditems:
-                self.dataflow_history_manager.remove_dependencies(j['parent'],
+            for j in self.df_controller.storeditems:
+                self.df_controller.remove_dependencies(j['parent'],
                                                                   j['child'])
             result.deleted_cells = result_deleted_cells
 
         if isinstance(result.result, LinkedResult):
-            result.result.__sethist__(self.dataflow_history_manager)
+            result.result.__sethist__(self.df_controller)
 
-        self.dataflow_history_manager.storeditems = []
+        self.df_controller.storeditems = []
 
         if store_history:
             result.execution_count = int(uuid, 16)
@@ -598,38 +598,38 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
             if store_history:
                 # print("STORING HISTORY", cur_execution_count)
                 # print("STORING UPDATE VALUE:", uuid, result)
-                self.dataflow_history_manager.update_value(uuid, result.result)
-                self.dataflow_history_manager.set_not_stale(uuid)
+                self.df_controller.update_value(uuid, result.result)
+                self.df_controller.set_not_stale(uuid)
 
             if store_history:
                 cells = []
                 nodes = []
-                for uid in self.dataflow_history_manager.sorted_keys():
+                for uid in self.df_controller.sorted_keys():
                     cells.append(uid)
-                if uuid in self.dataflow_history_manager.value_cache:
-                    if(self.dataflow_history_manager.value_cache[uuid] is not None):
+                if uuid in self.df_controller.value_cache:
+                    if(self.df_controller.value_cache[uuid] is not None):
                         nodes.append('Out_'+uuid+'')
-                    if isinstance(self.dataflow_history_manager.value_cache[uuid], LinkedResult):
-                        nodes = list(self.dataflow_history_manager.value_cache[uuid].keys())
+                    if isinstance(self.df_controller.value_cache[uuid], LinkedResult):
+                        nodes = list(self.df_controller.value_cache[uuid].keys())
                 result.nodes = nodes
                 result.cells = cells
-                result.links = self.dataflow_history_manager.raw_semantic_upstream(uuid)
-                result.deleted_cells = self.dataflow_history_manager.deleted_cells
+                result.links = self.df_controller.raw_semantic_upstream(uuid)
+                result.deleted_cells = self.df_controller.deleted_cells
 
                 result.internal_nodes = internalnodes
                 # print("GOT DELETED CELLS:", result.deleted_cells, file=sys.__stdout__)
-                self.dataflow_history_manager.deleted_cells = []
+                self.df_controller.deleted_cells = []
 
-                result.imm_upstream_deps = self.dataflow_history_manager.get_semantic_upstream(uuid)
-                result.all_upstream_deps = self.dataflow_history_manager.all_upstream(uuid)
+                result.imm_upstream_deps = self.df_controller.get_semantic_upstream(uuid)
+                result.all_upstream_deps = self.df_controller.all_upstream(uuid)
                 result.update_downstreams = []
-                for i in set(self.dataflow_history_manager.all_upstream(uuid)+old_deps):
-                    result.update_downstreams.append({'key':i, 'data':self.dataflow_history_manager.get_downstream(i)})
-                result.imm_downstream_deps = self.dataflow_history_manager.get_downstream(uuid)
-                result.all_downstream_deps = self.dataflow_history_manager.all_downstream(uuid)
+                for i in set(self.df_controller.all_upstream(uuid)+old_deps):
+                    result.update_downstreams.append({'key':i, 'data':self.df_controller.get_downstream(i)})
+                result.imm_downstream_deps = self.df_controller.get_downstream(uuid)
+                result.all_downstream_deps = self.df_controller.all_downstream(uuid)
 
             # run auto_updates
-            self.dataflow_history_manager.run_auto_updates(uuid)
+            self.df_controller.run_auto_updates(uuid)
         return result
 
     # def run_cell(self, raw_cell, store_history=False, silent=False, shell_futures=True,
@@ -669,19 +669,19 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
     #     old_deps = []
     #
     #     if store_history:
-    #         self.dataflow_history_manager.update_codes(code_dict)
-    #         self.dataflow_history_manager.update_auto_update(auto_update_flags)
-    #         self.dataflow_history_manager.update_force_cached(force_cached_flags)
+    #         self.df_controller.update_codes(code_dict)
+    #         self.df_controller.update_auto_update(auto_update_flags)
+    #         self.df_controller.update_force_cached(force_cached_flags)
     #         self.user_ns._add_links(output_tags)
     #         # also put the current cell into the cache and force recompute
     #         if uuid not in code_dict:
-    #             self.dataflow_history_manager.update_code(uuid, raw_cell)
-    #         if uuid in self.dataflow_history_manager.value_cache and uuid in self.dataflow_history_manager.dep_parents:
-    #             old_deps = self.dataflow_history_manager.all_upstream(uuid)
-    #             for i in list(self.dataflow_history_manager.dep_parents[uuid]):
-    #                 self.dataflow_history_manager.remove_dependencies(i,uuid)
-    #             self.dataflow_history_manager.dep_semantic_parents[uuid] = {}
-    #         self.dataflow_history_manager.update_flags(
+    #             self.df_controller.update_code(uuid, raw_cell)
+    #         if uuid in self.df_controller.value_cache and uuid in self.df_controller.dep_parents:
+    #             old_deps = self.df_controller.all_upstream(uuid)
+    #             for i in list(self.df_controller.dep_parents[uuid]):
+    #                 self.df_controller.remove_dependencies(i,uuid)
+    #             self.df_controller.dep_semantic_parents[uuid] = {}
+    #         self.df_controller.update_flags(
     #             store_history=store_history,
     #             silent=silent,
     #             shell_futures=shell_futures,
@@ -691,8 +691,8 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
     #         raw_cell, store_history, silent, shell_futures)
     #     result = ExecutionResult(info)
     #
-    #     result.deleted_cells = self.dataflow_history_manager.deleted_cells
-    #     self.dataflow_history_manager.deleted_cells = []
+    #     result.deleted_cells = self.df_controller.deleted_cells
+    #     self.df_controller.deleted_cells = []
     #
     #
     #     if (not raw_cell) or raw_cell.isspace():
@@ -826,13 +826,13 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
     #             # self.user_ns = user_ns
     #
     #             if(not self.last_execution_succeeded):
-    #                 for j in self.dataflow_history_manager.storeditems:
-    #                     self.dataflow_history_manager.remove_dependencies(j['parent'],j['child'])
+    #                 for j in self.df_controller.storeditems:
+    #                     self.df_controller.remove_dependencies(j['parent'],j['child'])
     #
     #             if isinstance(result.result, LinkedResult):
-    #                 result.result.__sethist__(self.dataflow_history_manager)
+    #                 result.result.__sethist__(self.df_controller)
     #
-    #             self.dataflow_history_manager.storeditems = []
+    #             self.df_controller.storeditems = []
     #             self.events.trigger('post_execute')
     #             if not silent:
     #                 self.events.trigger('post_run_cell')
@@ -844,8 +844,8 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
     #             # print("STORING HISTORY", cur_execution_count)
     #             self.history_manager.store_output(cur_execution_count)
     #             # print("STORING UPDATE VALUE:", uuid, result)
-    #             self.dataflow_history_manager.update_value(uuid, result.result)
-    #             self.dataflow_history_manager.set_not_stale(uuid)
+    #             self.df_controller.update_value(uuid, result.result)
+    #             self.df_controller.set_not_stale(uuid)
     #
     #             # Each cell is a *single* input, regardless of how many lines it has
     #             # self.execution_count += 1
@@ -853,30 +853,30 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
     #         if store_history:
     #             cells = []
     #             nodes = []
-    #             for uid in self.dataflow_history_manager.sorted_keys():
+    #             for uid in self.df_controller.sorted_keys():
     #                 cells.append(uid)
-    #             if uuid in self.dataflow_history_manager.value_cache:
-    #                 if(self.dataflow_history_manager.value_cache[uuid] is not None):
+    #             if uuid in self.df_controller.value_cache:
+    #                 if(self.df_controller.value_cache[uuid] is not None):
     #                     nodes.append('Out_'+uuid+'')
-    #                 if isinstance(self.dataflow_history_manager.value_cache[uuid], LinkedResult):
-    #                     nodes = list(self.dataflow_history_manager.value_cache[uuid].keys())
+    #                 if isinstance(self.df_controller.value_cache[uuid], LinkedResult):
+    #                     nodes = list(self.df_controller.value_cache[uuid].keys())
     #             result.nodes = nodes
     #             result.cells = cells
-    #             result.links = self.dataflow_history_manager.raw_semantic_upstream(uuid)
-    #             result.deleted_cells = self.dataflow_history_manager.deleted_cells
-    #             self.dataflow_history_manager.deleted_cells = []
+    #             result.links = self.df_controller.raw_semantic_upstream(uuid)
+    #             result.deleted_cells = self.df_controller.deleted_cells
+    #             self.df_controller.deleted_cells = []
     #             result.internal_nodes = internalnodes
     #
-    #             result.imm_upstream_deps = self.dataflow_history_manager.get_semantic_upstream(uuid)
-    #             result.all_upstream_deps = self.dataflow_history_manager.all_upstream(uuid)
+    #             result.imm_upstream_deps = self.df_controller.get_semantic_upstream(uuid)
+    #             result.all_upstream_deps = self.df_controller.all_upstream(uuid)
     #             result.update_downstreams = []
-    #             for i in set(self.dataflow_history_manager.all_upstream(uuid)+old_deps):
-    #                 result.update_downstreams.append({'key':i, 'data':self.dataflow_history_manager.get_downstream(i)})
-    #             result.imm_downstream_deps = self.dataflow_history_manager.get_downstream(uuid)
-    #             result.all_downstream_deps = self.dataflow_history_manager.all_downstream(uuid)
+    #             for i in set(self.df_controller.all_upstream(uuid)+old_deps):
+    #                 result.update_downstreams.append({'key':i, 'data':self.df_controller.get_downstream(i)})
+    #             result.imm_downstream_deps = self.df_controller.get_downstream(uuid)
+    #             result.all_downstream_deps = self.df_controller.all_downstream(uuid)
     #
     #         # run auto_updates
-    #         self.dataflow_history_manager.run_auto_updates(uuid)
+    #         self.df_controller.run_auto_updates(uuid)
     #
     #
     #     return result
@@ -1206,19 +1206,19 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
         ns['_ih'] = self.history_manager.input_hist_parsed
         # ns['_oh'] = self.history_manager.output_hist
         ns['_dh'] = self.history_manager.dir_hist
-        ns['_oh'] = self.dataflow_history_manager
+        ns['_oh'] = self.df_controller
         ns['_func'] = self.dataflow_function_manager
 
         # user aliases to input and output histories.  These shouldn't show up
         # in %who, as they can have very large reprs.
         ns['In'] = self.history_manager.input_hist_parsed
         # ns['Out'] = self.history_manager.output_hist
-        ns['Out'] = self.dataflow_history_manager
+        ns['Out'] = self.df_controller
         ns['Func'] = self.dataflow_function_manager
         ns['_build_linked_result'] = build_linked_result
         ns['_ns'] = self.user_ns
 
-        self.dataflow_state = DataflowState(self.dataflow_history_manager)
+        self.dataflow_state = DataflowState(self.df_controller)
         self.user_ns.__df_state__ = self.dataflow_state
 
         # Store myself as the public api!!!
@@ -1242,9 +1242,9 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
     def init_history(self):
         """Sets up the command history, and starts regular autosaves."""
         self.history_manager = HistoryManager(shell=self, parent=self)
-        self.dataflow_history_manager = DataflowHistoryManager(shell=self)
+        self.df_controller = DataflowController(shell=self)
         self.dataflow_function_manager = \
-            DataflowFunctionManager(self.dataflow_history_manager)
+            DataflowFunctionManager(self.df_controller)
         self.configurables.append(self.history_manager)
 
     # def prepare_user_module(self, user_module=None, user_ns=None):

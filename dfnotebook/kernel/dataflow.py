@@ -19,7 +19,7 @@ class DataflowInvalidRefError(DataflowCellException):
     def __str__(self):
         return "Invalid Reference to Cell '{}'".format(self.cid)
 
-class DataflowHistoryManager(object):
+class DataflowController(object):
     def __init__(self, shell, **kwargs):
         self.shell = shell
         self.flags = dict(kwargs)
