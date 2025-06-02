@@ -8,7 +8,7 @@ class DataflowCellException(Exception):
         self.cid = cid
 
     def __str__(self):
-        return "Cell '{}' raised an exception".format(self.cid)
+        return "Cell(s) '{}' raised an exception".format(self.cid)
 
 class DataflowCacheError(DataflowCellException):
     def __str__(self):
@@ -18,6 +18,28 @@ class DataflowInvalidRefError(DataflowCellException):
     '''Called when an Invalid OutCell is called'''
     def __str__(self):
         return "Invalid Reference to Cell '{}'".format(self.cid)
+
+class InvalidCellModification(KeyError):
+    '''This error results when another cell tries to modify an Out reference'''
+    pass
+
+class CyclicalCallError(Exception):
+    """This error results when the call being made is Cyclical"""
+    def __init__(self, cell_id):
+        super().__init__(self)
+        self.cell_id = cell_id
+
+    def __str__(self):
+        return "Out[{}] results in a Cyclical call".format(self.cell_id)
+
+class DuplicateNameError(Exception):
+    def __init__(self, var_name, cell_id):
+        super().__init__(self)
+        self.var_name = var_name
+        self.cell_id = cell_id
+
+    def __str__(self):
+        return "name '{}' has already been defined in Cell '{}'".format(self.var_name,self.cell_id)
 
 class DataflowController(object):
     def __init__(self, shell, **kwargs):
@@ -355,24 +377,6 @@ class DataflowFunctionManager(object):
         elif ovars:
             return next(iter(res.values()))
         return retval
-
-class CyclicalCallError(Exception):
-    """This error results when the call being made is Cyclical"""
-    def __init__(self, cell_id):
-        super().__init__(self)
-        self.cell_id = cell_id
-
-    def __str__(self):
-        return "Out[{}] results in a Cyclical call".format(self.cell_id)
-
-class DuplicateNameError(Exception):
-    def __init__(self, var_name, cell_id):
-        super().__init__(self)
-        self.var_name = var_name
-        self.cell_id = cell_id
-
-    def __str__(self):
-        return "name '{}' has already been defined in Cell '{}'".format(self.var_name,self.cell_id)
 
 class DataflowState:
     def __init__(self, history):
