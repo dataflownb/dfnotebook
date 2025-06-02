@@ -42,7 +42,7 @@ from ast import AST
 import importlib
 
 from .dataflow import DataflowController, DataflowFunctionManager, \
-    DataflowNamespace, DataflowCellException, DataflowState, DuplicateNameError
+    DataflowNamespace, DataflowCellException, DuplicateNameError
 from .dflink import build_linked_result
 
 # Python 3.10 removed the alias from collections
@@ -353,7 +353,7 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
         def cell_scope_completer(completer, text):
             print("GOT COMPLETION REQUEST:", completer, text,
                   file=sys.__stdout__)
-            results = self.dataflow_state.complete(text, self.input_tags)
+            results = self.df_controller.complete(text, self.input_tags)
             return results
         self.set_custom_completer(cell_scope_completer)
 
@@ -514,7 +514,7 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
             self.df_controller.update_codes(code_dict)
             self.df_controller.update_auto_update(auto_update_flags)
             self.df_controller.update_force_cached(force_cached_flags)
-            self.dataflow_state.add_links(output_tags)
+            self.df_controller.add_links(output_tags)
             # also put the current cell into the cache and force recompute
             if uuid not in code_dict:
                 self.df_controller.update_code(uuid, raw_cell)
@@ -1215,8 +1215,7 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
         ns['_build_linked_result'] = build_linked_result
         ns['_ns'] = self.user_ns
 
-        self.dataflow_state = DataflowState(self.df_controller)
-        self.user_ns.__df_state__ = self.dataflow_state
+        self.user_ns.__df_controller__ = self.df_controller
 
         # Store myself as the public api!!!
         ns['get_ipython'] = self.get_ipython

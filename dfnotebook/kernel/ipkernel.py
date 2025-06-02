@@ -69,6 +69,10 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         #         asyncio.Future,)
 
     @property
+    def df_controller(self):
+        return self.shell.df_controller
+
+    @property
     def execution_count(self):
         # return self.shell.execution_count
         return self.shell.uuid
@@ -193,12 +197,12 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         parsed_code = ''
         try:
             code = convert_dollar(
-                code, self.shell.dataflow_state, uuid, identifier_replacer, input_tags
+                code, self.df_controller, uuid, identifier_replacer, input_tags
             )
             dollar_converted = True
             parsed_code = code;
             code = ground_refs(
-                code, self.shell.dataflow_state, uuid, identifier_replacer, input_tags, output_tags=self._output_tags
+                code, self.df_controller, uuid, identifier_replacer, input_tags, output_tags=self._output_tags
             )
             self._identifier_refs[uuid] = get_references(code)
             self._persistent_code[uuid] = convert_identifier(code, dollar_replacer, input_tags={})
@@ -218,7 +222,7 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         #print("FIRST CODE:", code)
         if not silent:
             if len(parsed_code) > 0:
-                display_code = ground_refs(parsed_code, self.shell.dataflow_state, uuid, identifier_replacer, input_tags, output_tags=self._output_tags, display_code=True)
+                display_code = ground_refs(parsed_code, self.df_controller, uuid, identifier_replacer, input_tags, output_tags=self._output_tags, display_code=True)
                 display_code = convert_identifier(display_code, dollar_replacer, input_tags=input_tags)
                 self._publish_execute_input(display_code, parent, execution_count)
             else:
@@ -229,7 +233,7 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         # convert all tilded code
         try:
             code = convert_dollar(
-                code, self.shell.dataflow_state, uuid, ref_replacer, input_tags
+                code, self.df_controller, uuid, ref_replacer, input_tags
             )
         except SyntaxError as e:
             # ignore this for now, catch it in do_execute
@@ -499,11 +503,11 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
             try:
                 tag_refs = { value: key for key, value in refs['tag_refs'].items() }
                 code = convert_dollar(
-                    code, self.shell.dataflow_state, uuid, identifier_replacer, dfmetadata.get("input_tags", {}), reversion=True, tag_refs=tag_refs
+                    code, self.df_controller, uuid, identifier_replacer, dfmetadata.get("input_tags", {}), reversion=True, tag_refs=tag_refs
                 )
 
                 code = ground_refs(
-                    code, self.shell.dataflow_state, uuid, identifier_replacer, dfmetadata.get("input_tags", {}), output_tags=dict(curr_output_tags), cell_refs=dict(code_refs), reversion=True
+                    code, self.df_controller, uuid, identifier_replacer, dfmetadata.get("input_tags", {}), output_tags=dict(curr_output_tags), cell_refs=dict(code_refs), reversion=True
                 )
 
                 code = convert_identifier(code, dollar_replacer, input_tags=dfmetadata.get("input_tags", {}))
