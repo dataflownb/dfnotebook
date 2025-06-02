@@ -1,6 +1,8 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
+import { getCellModel } from './model';
+
 import {
   CodeCell,
   MarkdownCell,
@@ -13,7 +15,10 @@ import {
   DataflowCodeCell,
   DataflowMarkdownCell,
   DataflowRawCell,
+  DataflowInputArea,
+  DataflowCodeCellModel,
 } from '@dfnotebook/dfcells';
+import { DataflowNotebookModel } from './model';
 
 /**
  * The namespace for the `StaticNotebook` class statics.
@@ -37,6 +42,7 @@ export namespace DataflowStaticNotebook {
       if (!options.contentFactory) {
         options.contentFactory = this;
       }
+      options.model = getCellModel(options.model.sharedModel) as DataflowCodeCellModel;
       return new DataflowCodeCell(options).initializeState();
     }
 
@@ -72,7 +78,35 @@ export namespace DataflowStaticNotebook {
   }
 }
 
-export class DataflowNotebook extends Notebook { }
+export class DataflowNotebook extends Notebook { 
+  constructor(options: Notebook.IOptions) {
+    super(options);
+  }
+
+  public initializeState() {
+    // this signal fires before the widget is added...
+    this.model?.cells.changed.connect(this.updateTagState, this);
+    this.updateTagState();
+  }
+
+  public updateTagState() {
+    const model = this.model as DataflowNotebookModel;
+    console.log("Updating tag state for DataflowNotebook", model?.enableTags);
+    for (const cell of this.widgets) {
+      if (cell.inputArea) {
+        (cell.inputArea as DataflowInputArea).setTagEnabled(model.enableTags);
+      } else {
+        console.warn("Cell does not have inputArea", cell);
+      }
+    }
+  }
+
+  public toggleTagEnabled() {
+    const model = this.model as DataflowNotebookModel;
+    model.enableTags = !model.enableTags;
+    this.updateTagState()    
+  }
+}
 
 export namespace DataflowNotebook {
   /**
