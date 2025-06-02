@@ -1,4 +1,4 @@
-from collections import defaultdict, namedtuple
+from collections import defaultdict, namedtuple, deque
 from collections.abc import KeysView, ItemsView, ValuesView, MutableMapping
 from .dflink import LinkedResult
 import itertools
@@ -40,6 +40,163 @@ class DuplicateNameError(Exception):
 
     def __str__(self):
         return "name '{}' has already been defined in Cell '{}'".format(self.var_name,self.cell_id)
+
+class DataflowGraph(object):
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.parents = defaultdict(set) # child -> set(parent)
+        self.children = defaultdict(set) # parent -> set(child)
+
+    def remove_node(self, node):
+        self.remove_all_parents(node)
+        self.remove_all_children(node)
+
+    def add_edge(self, parent, child=None):
+        self.parents[child].add(parent) 
+        self.children[parent].add(child) 
+
+    def remove_edge(self, parent, child=None):
+        self.parents[child].discard(parent)
+        self.children[parent].discard(child)
+
+    def remove_all_children(self, parent):
+        for child in self.children[parent]:
+            self.parents[child].discard(parent)
+        del self.children[parent]
+
+    def remove_all_parents(self, child):
+        for parent in self.parents[child]:
+            self.children[parent].discard(child)
+        del self.parents[child]
+
+    def has_cycle(self):
+        in_degree = {cid: len(pids) for cid, pids in self.parents.items() if len(pids) > 0} 
+        frontier = deque([pid for pid in self.children if pid not in in_degree])
+
+        count = -len(frontier)
+        while frontier:
+            pid = frontier.popleft()
+            count += 1
+            for cid in self.children[pid]:
+                in_degree[cid] -= 1
+                if in_degree[cid] == 0:
+                    frontier.append(cid)
+
+        return count != len(in_degree)
+
+    def downstream(self, k):
+        visited = set()
+        res = set()
+        frontier = deque(self.children[k])
+        while frontier:
+            pid = frontier.popleft()
+            visited.add(pid)
+            res.add(pid)
+            for cid in self.children[pid]:
+                if cid not in visited:
+                    frontier.append(cid)
+        return res
+    descendants = downstream
+
+    def upstream(self, k):
+        visited = set()
+        res = set()
+        frontier = deque(self.parents[k])
+        while frontier:
+            cid = frontier.popleft()
+            visited.add(cid)
+            res.add(cid)
+            for pid in self.parents[cid]:
+                if pid not in visited:
+                    frontier.append(pid)
+        return res
+    ancestors = upstream
+
+    def edge_list(self):
+        return [ [parent, child]
+            for parent, children in self.children.items()
+            for child in children
+        ]
+
+class DataflowCell:
+    def __init__(self, cell_id, **kwargs):
+        self.cell_id = cell_id
+        self.code = None
+        self.persistent_code = None
+        self.input_refs = {}
+        self.output_tags = set()
+        self.name = None
+        self.executed_code = None
+        self.result = None
+        self.is_stale = True
+        self.count = -1
+        self.is_running = False
+        self.did_run = False
+        self.update(**kwargs)
+
+    def update(self, **kwargs):
+        was_changed = False
+        self.code = kwargs.get('code', None)
+        self.name = kwargs.get('name', None)
+        self.executed_code = kwargs.get('executed_code', None)
+        self.input_refs = kwargs.get('input_refs', {})
+        self.output_tags = set(kwargs.get('output_tags', []))
+        self.auto_update = kwargs.get('auto_update', False)
+        self.force_cached = kwargs.get('force_cached', False)
+
+        # only update if passed in and different...
+        new_persistent_code = kwargs.get('persistent_code', None)
+        if new_persistent_code is not None and new_persistent_code != self.persistent_code:
+            self.persistent_code = new_persistent_code
+            self.is_stale = True
+            self.result = None
+            self.output_ids = set()
+            was_changed = True
+        return was_changed
+
+    def to_dict(self):
+        return {
+            'cell_id': self.cell_id,
+            'name': self.name, # could be none...
+            'code': self.code,
+            'persistent_code': self.persistent_code, # could be none if error?
+            'executed_code': self.executed_code, # could be none if error?
+            'input_refs': {cell_id: list(refs) for cell_id, refs in self.input_refs.items()},
+            'output_tags': list(self.output_tags),
+        }
+
+    def reset_did_run(self):
+        self.did_run = False
+
+    def set_running(self):
+        self.is_running = True
+
+    # FIXME unify with add_link?
+    # question is whether we should set output_tags if there is an error
+    # does add_link only run if the cell is successful? think so...
+    def set_output_tags_from_result(self):
+        if not isinstance(self.result, LinkedResult):
+            self.output_tags = set()
+        else:
+            self.output_tags = {res_tag for res_tag in self.result if res_tag is not None}
+
+    def set_result(self, result):
+        self.result = result
+        self.set_output_tags_from_result()
+        self.is_stale = False
+        self.is_running = False
+        self.did_run = True
+
+    def set_failed(self):
+        self.result = None
+        self.is_stale = True
+        self.is_running = False
+        self.did_run = True
+
+    def should_use_cached(self):
+        return self.force_cached or not self.is_stale
 
 class DataflowController(object):
     def __init__(self, shell, **kwargs):
