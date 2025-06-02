@@ -551,7 +551,6 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
         # self.user_ns._start_uuid(self.uuid)
 
         self.uuid = uuid
-        self.dataflow_state.set_cur_cell_id(self.uuid)
         self.push_result()
 
         result = await super().run_cell_async(raw_cell,
@@ -565,8 +564,6 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
 
         self.pop_result()
         uuid = self.uuid
-        # this is actually referencing the parent uuid...
-        self.dataflow_state.set_cur_cell_id(self.parent_uuid())
 
         # AFTER RUN_AST_NODES CODE
         # # Reset this so later displayed values do not modify the

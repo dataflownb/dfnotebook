@@ -24,7 +24,7 @@ class ZMQShellDisplayHook(ipyZMQShellDisplayHook):
         return self.shell.uuid
 
     def update_dataflow_ns(self, result):
-        self.shell.dataflow_state.reset_cell(result.__uuid__)
+        self.shell.dataflow_state.remove_links(result.__uuid__)
         for res_tag in result.keys():
             self.shell.dataflow_state.add_link(res_tag, result.__uuid__)
 

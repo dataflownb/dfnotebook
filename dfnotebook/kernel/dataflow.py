@@ -80,12 +80,12 @@ class DataflowController(object):
             for parent in self.all_upstream(key):
                 self.remove_dependencies(key, parent)
                 self.remove_semantic_dependencies(key, parent)
-            self.shell.dataflow_state.reset_cell(key)
+            self.shell.dataflow_state.remove_links(key)
             self.deleted_cells.append(key)
             del self.last_calculated[key]
         elif key not in self.code_cache or self.code_cache[key] != code:
             # clear out the old __links__ and __rev_links__ (if exist)
-            self.shell.dataflow_state.reset_cell(key)
+            self.shell.dataflow_state.remove_links(key)
             self.func_cached[key] = False
             self.code_cache[key] = code
             self.set_stale(key)
@@ -384,71 +384,27 @@ class DataflowState:
         self.cur_links = defaultdict(list)
         self.links = defaultdict(set) # most recent is last
         self.rev_links = defaultdict(set)
-        self.cur_cell_id = None
 
-    def set_cur_cell_id(self, cell_id):
-        self.cur_cell_id = cell_id
-
-    def has_link(self, k):
-        return self.has_external_link(k, self.cur_cell_id)
-        # return k in self.cur_links
-
-    def get_parent(self, k):
-        if not self.has_link(k):
-            raise DataflowCellException(f"No cell defines '{k}'")
-        # return self.cur_links[k][-1]
-        return self.get_external_link(k, self.cur_cell_id)
-
-    get_cell = get_parent
-
-    def get_link(self, k):
-        # We should not get here unless the reference is not
-        # found during tokenization. This can happen is the function
-        # references the globals directly
-        # (e.g. pandas query with @var references)
-        # If this happens, we need to add it to the beginning of the cell
-        # to make sure the reference is explicitly linked to the correct
-        # cell_id
-        cell_id = self.get_parent(k)
-        # rev_links = self.rev_links[cell_id]
-
-        # FIXME want to update the code/something in self.cur_cell_id
-        # so that it dumps in a reference at the top of the cell as
-        # k = k$cell_id
-        # could have preference for setting as k = k$^cell_id
-        #
-        # self.history.add_deps(self.cur_cell_id, cell_id, k)
-        return self.history.get_item(cell_id)[k]
+    def add_link(self, tag, cell_id, make_current=True):
+        if isinstance(tag, str):
+            self.links[tag].add(cell_id)
+            self.rev_links[cell_id].add(tag)
+            if make_current:
+                self.cur_links[tag].append(cell_id)
 
     def add_links(self, output_tags):
-        """Used for adding links of pre-existing links currently only used for cold starts"""
-
-        # FIXME really need to store this information in the notebook metadata
-        # in order to keep track of this...
         new_tags = set()
         for (cell_id, tag_list) in output_tags.items():
             for tag in tag_list:
-                # print("OUTER ADD_LINKS:", cell_id, tag)
                 self.add_link(tag, cell_id, make_current=False)
                 new_tags.add(tag)
         for tag in new_tags:
             if len(self.links[tag]) == 1 and not self.has_current_link(tag):
                 # can make current because unambiguous
                 cell_id = next(iter(self.links[tag]))
-                # print('ADDING TAG (ADD_LINKS):', cell_id, tag)
                 self.cur_links[tag].append(cell_id)
 
-    def add_link(self, tag, cell_id, make_current=True):
-        # print("OUTER ADD_LINK:", cell_id, tag)
-        if isinstance(tag, str):
-            self.links[tag].add(cell_id)
-            self.rev_links[cell_id].add(tag)
-            if make_current:
-                # print('ADDING TAG (ADD_LINK):', cell_id, tag)
-                self.cur_links[tag].append(cell_id)
-
-    def reset_cell(self, cell_id):
-        # print(f"{cell_id} LINKS: {self.cur_links} REV LINKS: {self.rev_links} ALL_LINKS: {self.links}")
+    def remove_links(self, cell_id):
         if cell_id in self.rev_links:
             for name in self.rev_links[cell_id]:
                 if cell_id in self.cur_links[name]:
@@ -482,8 +438,6 @@ class DataflowState:
         cell_start = None
         if '$' in text:
             id_start, cell_start = text.split('$',maxsplit=1)
-        import sys
-        # print(f"COMPLETER INTERNAL: '{id_start}' '{cell_start}'", file=sys.__stdout__)
         for link, cell_ids in self.links.items():
             if link.startswith(id_start):
                 if cell_start:
