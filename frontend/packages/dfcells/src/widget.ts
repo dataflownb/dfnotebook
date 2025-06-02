@@ -5,7 +5,6 @@ import {
   CodeCell,
   IAttachmentsCellModel,
   ICellModel,
-  ICodeCellModel,
   IInputPrompt,
   MarkdownCell,
   RawCell

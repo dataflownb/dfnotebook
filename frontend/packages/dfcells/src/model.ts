@@ -1,5 +1,4 @@
 import { truncateCellId } from '@dfnotebook/dfutils';
-import { CellChange, ISharedCodeCell } from '@jupyter/ydoc';
 import {CodeCellModel, ICodeCellModel} from '@jupyterlab/cells';
 import { PartialJSONObject } from '@lumino/coreutils';
 
