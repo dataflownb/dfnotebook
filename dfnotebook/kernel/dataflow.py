@@ -377,8 +377,8 @@ class DuplicateNameError(Exception):
 class DataflowState:
     def __init__(self, history):
         self.history = history
-        self.links = defaultdict(list)
-        self.all_links = defaultdict(set) # most recent is last
+        self.cur_links = defaultdict(list)
+        self.links = defaultdict(set) # most recent is last
         self.rev_links = defaultdict(set)
         self.cur_cell_id = None
 
@@ -387,12 +387,12 @@ class DataflowState:
 
     def has_link(self, k):
         return self.has_external_link(k, self.cur_cell_id)
-        # return k in self.links
+        # return k in self.cur_links
 
     def get_parent(self, k):
         if not self.has_link(k):
             raise DataflowCellException(f"No cell defines '{k}'")
-        # return self.links[k][-1]
+        # return self.cur_links[k][-1]
         return self.get_external_link(k, self.cur_cell_id)
 
     get_cell = get_parent
@@ -428,47 +428,47 @@ class DataflowState:
                 self.add_link(tag, cell_id, make_current=False)
                 new_tags.add(tag)
         for tag in new_tags:
-            if len(self.all_links[tag]) == 1 and not self.has_current_link(tag):
+            if len(self.links[tag]) == 1 and not self.has_current_link(tag):
                 # can make current because unambiguous
-                cell_id = next(iter(self.all_links[tag]))
+                cell_id = next(iter(self.links[tag]))
                 # print('ADDING TAG (ADD_LINKS):', cell_id, tag)
-                self.links[tag].append(cell_id)
+                self.cur_links[tag].append(cell_id)
 
     def add_link(self, tag, cell_id, make_current=True):
         # print("OUTER ADD_LINK:", cell_id, tag)
         if isinstance(tag, str):
-            self.all_links[tag].add(cell_id)
+            self.links[tag].add(cell_id)
             self.rev_links[cell_id].add(tag)
             if make_current:
                 # print('ADDING TAG (ADD_LINK):', cell_id, tag)
-                self.links[tag].append(cell_id)
+                self.cur_links[tag].append(cell_id)
 
     def reset_cell(self, cell_id):
-        # print(f"{cell_id} LINKS: {self.links} REV LINKS: {self.rev_links} ALL_LINKS: {self.all_links}")
+        # print(f"{cell_id} LINKS: {self.cur_links} REV LINKS: {self.rev_links} ALL_LINKS: {self.links}")
         if cell_id in self.rev_links:
             for name in self.rev_links[cell_id]:
-                if cell_id in self.links[name]:
-                    self.links[name].remove(cell_id)
-                self.all_links[name].discard(cell_id)
+                if cell_id in self.cur_links[name]:
+                    self.cur_links[name].remove(cell_id)
+                self.links[name].discard(cell_id)
             del self.rev_links[cell_id]
 
     def has_current_link(self, k):
-        # print("HAS CURRENT LINK:", k, self.links[k])
-        return k in self.links and len(self.links[k]) > 0
+        # print("HAS CURRENT LINK:", k, self.cur_links[k])
+        return k in self.cur_links and len(self.cur_links[k]) > 0
 
     def get_current_link(self, k):
         if not self.has_current_link(k):
             raise DataflowCellException(f"No cell defines '{k}'")
-        return self.links[k][-1]
+        return self.cur_links[k][-1]
 
     def has_external_link(self, k, cur_id):
         return self.has_current_link(k) and self.get_current_link(k) != cur_id
-        # return (k in self.links) and (self.links[k][-1] != cur_id or len(self.links[k]) > 1)
+        # return (k in self.cur_links) and (self.cur_links[k][-1] != cur_id or len(self.cur_links[k]) > 1)
 
     def get_external_link(self, k, cur_id):
         if not self.has_external_link(k, cur_id):
             raise DataflowCellException(f"No external link to '{k}'")
-        for cell_id in reversed(self.links[k]):
+        for cell_id in reversed(self.cur_links[k]):
             if cell_id != cur_id:
                 return cell_id
 
@@ -480,7 +480,7 @@ class DataflowState:
             id_start, cell_start = text.split('$',maxsplit=1)
         import sys
         # print(f"COMPLETER INTERNAL: '{id_start}' '{cell_start}'", file=sys.__stdout__)
-        for link, cell_ids in self.all_links.items():
+        for link, cell_ids in self.links.items():
             if link.startswith(id_start):
                 if cell_start:
                     results.extend(link + '$' + input_tag
@@ -497,8 +497,8 @@ class DataflowState:
         return results
 
     def clear(self):
+        self.cur_links.clear()
         self.links.clear()
-        self.all_links.clear()
         self.rev_links.clear()
 
 class DataflowNamespace(dict):
