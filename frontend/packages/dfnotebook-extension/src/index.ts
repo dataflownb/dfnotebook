@@ -34,7 +34,7 @@ import { DocumentRegistry, IDocumentWidget } from '@jupyterlab/docregistry';
 import { IDefaultFileBrowser } from '@jupyterlab/filebrowser';
 import { ILauncher } from '@jupyterlab/launcher';
 import { IMainMenu } from '@jupyterlab/mainmenu';
-import { truncateCellId } from '@dfnotebook/dfutils';
+import { cellIdIntToStr, truncateCellId } from '@dfnotebook/dfutils';
 import * as nbformat from '@jupyterlab/nbformat';
 import {
   ExecutionIndicator,
@@ -771,6 +771,48 @@ const panelToolbar: JupyterFrontEndPlugin<void> = {
     });    
   }
 }
+
+function addExecuteInputHandler(nbPanel: NotebookPanel) {
+  const sessionContext = nbPanel.sessionContext;
+  const kernel = sessionContext.session?.kernel;
+  kernel?.iopubMessage.connect(async (sender, msg : KernelMessage.IIOPubMessage) => {
+    switch (msg.header.msg_type) {
+      case 'execute_input':
+        const executionCount = (msg as KernelMessage.IExecuteInputMsg)
+          .content.execution_count;
+        if (executionCount !== null) {
+          const cellId = cellIdIntToStr(executionCount);
+          const matchingCell = nbPanel.content.widgets.find(cell => {
+            return truncateCellId(cell.model.id) === cellId;
+          }) as CodeCell;
+          const cellModel = matchingCell.model as IDataflowCodeCellModel;
+          cellModel.code = (msg as KernelMessage.IExecuteInputMsg).content.code;
+          matchingCell.model.outputs.clear();        
+        }
+        break;
+      default:
+        return true;
+    }
+    return true;
+  });
+}
+
+const dfNotebookSetupPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@dfnotebook/dfnotebook-extension:execute-input',
+  autoStart: true,
+  requires: [INotebookTracker],
+  activate: (app: JupyterFrontEnd, tracker: INotebookTracker) => {
+    tracker.widgetAdded.connect((outerSender, nbPanel) => {
+      void Promise.all([
+        nbPanel.context.ready,
+        nbPanel.sessionContext.ready]).then(() => {
+          if (! nbPanel.model?.getMetadata('dfnotebook'))
+            return;
+          addExecuteInputHandler(nbPanel);
+        });
+      });
+    }
+  };
 
 
 const plugins: JupyterFrontEndPlugin<any>[] = [

@@ -16,7 +16,7 @@ import {
   DataflowOutputArea,
   DataflowOutputPrompt
 } from '@dfnotebook/dfoutputarea';
-import { cellIdIntToStr, truncateCellId } from '@dfnotebook/dfutils';
+import { truncateCellId } from '@dfnotebook/dfutils';
 import { IChangedArgs } from '@jupyterlab/coreutils';
 import { ISessionContext } from '@jupyterlab/apputils';
 import { JSONObject } from '@lumino/coreutils';
@@ -302,29 +302,6 @@ export namespace DataflowCodeCell {
       } else {
         model.deleteMetadata('execution');
       }
-
-      const clearOutput = (msg: KernelMessage.IIOPubMessage) => {
-        switch (msg.header.msg_type) {
-          case 'execute_input':
-            const executionCount = (msg as KernelMessage.IExecuteInputMsg)
-              .content.execution_count;
-            if (executionCount !== null) {
-              const cellId = cellIdIntToStr(executionCount);
-              if (cellIdModelMap) {
-                const cellModel = cellIdModelMap[cellId];
-                cellModel.sharedModel.setSource(
-                  (msg as KernelMessage.IExecuteInputMsg).content.code
-                );
-                cellModel.outputs.clear();
-              }
-            }
-            break;
-          default:
-            return true;
-        }
-        return true;
-      };
-      cell.outputArea.future.registerMessageHook(clearOutput);
 
       // Save this execution's future so we can compare in the catch below.
       future = cell.outputArea.future;
