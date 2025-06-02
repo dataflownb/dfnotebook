@@ -1,7 +1,6 @@
 import { Dialog, ISessionContext, showDialog } from '@jupyterlab/apputils';
 import {
     CodeCell,
-    CodeCellModel,
   type Cell,
   type ICodeCellModel,
   type MarkdownCell
@@ -14,6 +13,7 @@ import { DataflowCodeCell } from '@dfnotebook/dfcells';
 import { DataflowNotebookModel } from './model';
 import { Manager as GraphManager } from '@dfnotebook/dfgraph';
 import { truncateCellId } from '@dfnotebook/dfutils';
+import { JSONObject } from '@lumino/coreutils';
 
 /**
  * Run a single notebook cell.
@@ -85,13 +85,7 @@ import { truncateCellId } from '@dfnotebook/dfutils';
             let reply: KernelMessage.IExecuteReplyMsg | void;
             // !!! DATAFLOW NOTEBOOK CODE !!!
             if (notebook instanceof DataflowNotebookModel) {
-              const cellUUID =  truncateCellId(cell.model.id);
-              let dfData = getCellsMetadata(notebook, cellUUID)
-            
-              if(!notebook.getMetadata('enable_tags')){
-                dfData.dfMetadata.input_tags={};
-              }
-
+              const codeCellData = notebook.getDataflowCodeCellData();
               reply = await DataflowCodeCell.execute(
                   cell as DataflowCodeCell,
                   sessionContext,
@@ -99,22 +93,23 @@ import { truncateCellId } from '@dfnotebook/dfutils';
                   deletedCells,
                   recordTiming: notebookConfig.recordTiming
                   },
-                  dfData.dfMetadata,
-                  dfData.cellIdModelMap
+                  {
+                    uuid: truncateCellId(cell.model.id),
+                    cell_data_dict: codeCellData as JSONObject,
+                    use_tags: notebook.enableTags ?? false
+                  },
+                  notebook.codeCellModelMap
               );
-              
-              resetCellPrompt(notebook, cell)
-              
+                            
               if (reply) {
-                await updateDataflowMetadata(notebook, reply);
+                updateDataflowCodeCells(notebook, reply.content);
               }
 
               if (sessionContext?.session?.kernel) {
                 await dfCommPostData(notebook as DataflowNotebookModel, sessionContext);
                 
-                let sessId = sessionContext.session.id;
-                let dfData = getCellsMetadata(notebook, cellUUID);
-                GraphManager.graphs[sessId].updateCellContents(dfData.dfMetadata.code_dict);
+                const sessId = sessionContext.session.id;
+                GraphManager.graphs[sessId].updateCellContents(notebook.codeCellModelMap);
               }
             } 
             else {
@@ -182,17 +177,11 @@ import { truncateCellId } from '@dfnotebook/dfutils';
   }
 
   async function dfCommPostData(notebook: DataflowNotebookModel, sessionContext: ISessionContext): Promise<void> {
-    const dfData = getCellsMetadata(notebook, '');
-    
-    if (!notebook.getMetadata('enable_tags')) {
-      dfData.dfMetadata.input_tags = {};
-    }
-
+    const codeCellData = notebook.getDataflowCodeCellData();
+    const useTags = notebook.enableTags;
     try {
-      const response = await dfCommGetData(sessionContext, {'dfMetadata': dfData.dfMetadata, 'updateExecutedCode': true});
-      if (response?.code_dict && Object.keys(response.code_dict).length > 0) {
-        await updateNotebookCells(notebook, response);
-      }
+      const response = await dfCommGetData(sessionContext, {'dfMetadata': {'cell_data_dict': codeCellData}, 'updateExecutedCode': true, useTags});
+      updateDataflowCodeCells(notebook, response);
     } catch (error) {
       console.error('Error during kernel communication:', error);
     }
@@ -214,167 +203,9 @@ import { truncateCellId } from '@dfnotebook/dfutils';
     });
   }
 
-  async function updateNotebookCells(notebook: DataflowNotebookModel, content: { [key: string]: any }) {
-    const cellsArray = Array.from(notebook.cells);
-    cellsArray.forEach(cell => {
-      if (cell.type === 'code') {
-        const cId = truncateCellId(cell.id);
-        const cAny = cell as ICodeCellModel;
-        
-        if (content.code_dict.hasOwnProperty(cId)) {
-          //updating last executed code of cell in cellMap first to maintain dfcell dirty state
-          if (content.executed_code_dict?.hasOwnProperty(cId)) {
-            //@ts-expect-error
-            (cell as CodeCellModel)._executedCode = content.executed_code_dict[cId];
-          }
-          cAny.sharedModel.setSource(content.code_dict[cId]);
-        }
-      }
-    });
-  }
-
-  async function updateDataflowMetadata(notebook: DataflowNotebookModel, reply: KernelMessage.IExecuteReplyMsg): Promise<void> {
-    const content = reply?.content as any;
-
+  function updateDataflowCodeCells(notebook: DataflowNotebookModel, content: { [key: string]: any }): void {
     if (!content) return;
-
-    const allTags = getAllTags(notebook);
-    const cellsArray = Array.from(notebook.cells);
-
-    cellsArray.forEach((cell, index) => {
-      if (cell.type === 'code') {
-        updateCellMetadata(cell as CodeCellModel, content, allTags);
-      }
-    });
-  }
-
-  function updateCellMetadata(cellModel: CodeCellModel, content: any, allTags: { [key: string]: string }): void {
-    const cId = truncateCellId(cellModel.id);
-    const dfmetadata = cellModel.getMetadata('dfnotebook') || {};
-
-    if (content.persistent_code?.[cId]) {
-      dfmetadata.persistentCode = content.persistent_code[cId];
-    }
-
-    if (content.identifier_refs?.[cId]) {
-      const refs = content.identifier_refs[cId];
-      dfmetadata.inputVars = {
-        ref: refs,
-        tag_refs: mapTagsToRefs(refs, allTags)
-      };
-
-      let cellOutputTags: string[] = [];
-      for (let i = 0; i < cellModel.outputs.length; ++i) {
-        const out = cellModel.outputs.get(i);
-        if(out.metadata['output_tag']){
-          cellOutputTags.push(out.metadata['output_tag'] as string);
-        }
-      }
-      dfmetadata.outputVars = cellOutputTags;
-      const currSource = cellModel.sharedModel.getSource();
-      //@ts-expect-error
-      cellModel._executedCode = currSource;
-      cellModel.sharedModel.setSource(currSource)
-    }
-    cellModel.setMetadata('dfmetadata', dfmetadata);
-  }
-
-  function mapTagsToRefs(refs: { [key: string]: any }, allTags: { [key: string]: string }): { [key: string]: string } {
-    const tagRefs: { [key: string]: string } = {};
-
-    Object.keys(refs).forEach(key => {
-      if (allTags[key]) {
-        tagRefs[key] = allTags[key];
-      }
-    });
-
-    return tagRefs;
-  }
-
-  function resetCellPrompt(notebook: DataflowNotebookModel, cell: Cell) {
-    const currInputArea = cell.inputArea as any;
-    const dfmetadata = cell.model?.getMetadata('dfnotebook');
-    const currTag = dfmetadata.tag;
-    if(currInputArea){
-      if(!notebook.getMetadata('enable_tags')){
-        currInputArea.addTag("");
-        cell.model?.setMetadata('dfmetadata', dfmetadata);
-      }
-      else{
-        currInputArea.addTag(currTag);
-      }
-    }
-  }
-
-  export function getAllTags(notebook: DataflowNotebookModel): { [key: string]: string } {
-    const allTags: { [key: string]: string } = {};
-    const cellsArray = Array.from(notebook.cells);
-
-    cellsArray.forEach(cell => {
-      if (cell.type === 'code') {
-        const dfmetadata = cell.getMetadata('dfnotebook');
-        const tag = dfmetadata?.tag;
-        if (tag) {
-          const cId = truncateCellId(cell.id);
-          allTags[cId] = tag;
-        }
-      }
-    });
-
-    return allTags;
-  }
-
-  export function getCellsMetadata(notebook: DataflowNotebookModel, cellUUID: string) {
-    const codeDict: { [key: string]: string } = {};
-    const cellIdModelMap: { [key: string]: any } = {};
-    const outputTags: { [key: string]: string[] } = {};
-    const inputTags: { [key: string]: string } = {};
-    const allRefs: { [key: string]: { [key: string]: string[] } } = {};
-    const executedCode: { [key: string]: string } = {};
-    const autoUpdateFlags: { [key: string]: boolean } = {};
-    const forceCachedFlags: { [key: string]: boolean } = {};
-    const cellsArray = Array.from(notebook.cells);
-
-    const reactiveEnabled = notebook.getMetadata('enable_reactive') ?? false;
-    cellsArray.forEach(cell => {
-      if (cell.type === 'code') {
-        const c = cell as ICodeCellModel;
-        const cId = truncateCellId(c.id);
-        const dfmetadata = c.getMetadata('dfnotebook');
-        if(!dfmetadata.persistentCode && cId != cellUUID)
-        {
-          cellIdModelMap[cId] = c;
-          return;
-        }
-        const inputTag = dfmetadata?.tag;
-
-        if (inputTag) {
-          inputTags[inputTag] = cId;
-        }
-
-        codeDict[cId] = c.sharedModel.getSource();
-        cellIdModelMap[cId] = c;
-        outputTags[cId] = dfmetadata.outputVars;
-        allRefs[cId] = dfmetadata.inputVars;
-        //@ts-expect-error
-        executedCode[cId] = (cell as CodeCellModel)._executedCode;      
-        autoUpdateFlags[cId] = reactiveEnabled && dfmetadata.isReactive;
-        forceCachedFlags[cId] = reactiveEnabled && (! dfmetadata.isReactive);
-      }
-    });
-
-    const dfMetadata = {
-      // FIXME replace with utility function (see dfcells/widget)
-      uuid: cellUUID,
-      code_dict: codeDict,
-      output_tags: outputTags,
-      input_tags: inputTags,
-      auto_update_flags: autoUpdateFlags,
-      force_cached_flags: forceCachedFlags,
-      all_refs: allRefs,
-      executed_code: executedCode
-    };
-    return { dfMetadata, cellIdModelMap };
+    notebook.updateDataflowCodeCellData(content.cell_data_dict);
   }
 
   /**

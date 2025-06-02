@@ -24,6 +24,7 @@ import { Panel } from '@lumino/widgets';
 
 // FIXME need to add this back when dfgraph is working
 import { Manager as GraphManager } from '@dfnotebook/dfgraph';
+import { IDataflowCodeCellModel } from './model';
 /**
  * The CSS class added to the cell input area.
  */
@@ -224,7 +225,7 @@ export namespace DataflowCodeCell {
     sessionContext: ISessionContext,
     metadata?: JSONObject,
     dfData?: JSONObject,
-    cellIdModelMap?: { [key: string]: ICodeCellModel }
+    cellIdModelMap?: { [key: string]: IDataflowCodeCellModel }
   ): Promise<KernelMessage.IExecuteReplyMsg | void> {
     const model = cell.model;
     const code = model.sharedModel.getSource();
@@ -268,7 +269,6 @@ export namespace DataflowCodeCell {
         metadata,
         dfData,
         cellIdOutputsMap,
-        truncateCellId(cell.model.id)
       );
 
       // cell.outputArea.future assigned synchronously in `execute`
