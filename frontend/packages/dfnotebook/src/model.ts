@@ -75,7 +75,10 @@ export class DataflowNotebookModel extends NotebookModel {
   }
 
   public getDataflowMetadata(): IDataflowNotebookMetadata {
-      return this.getMetadata('dfnotebook') as IDataflowNotebookMetadata;
+    if (!this.getMetadata('dfnotebook')) {
+      this.initializeDataflowMetadata();
+    }
+    return this.getMetadata('dfnotebook') as IDataflowNotebookMetadata;
   }
 
   public setDataflowMetadata(metadata: IDataflowNotebookMetadata) {
@@ -169,9 +172,6 @@ export class DataflowNotebookModel extends NotebookModel {
 
     if (!isDataflow) {
       this.deleteMetadata('dfnotebook');
-    }
-    if (!this.getDataflowMetadata()) {
-      this.initializeDataflowMetadata();
     }
 
     this.updateDataflowCodeCellsFromMetadata();
