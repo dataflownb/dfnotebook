@@ -121,19 +121,6 @@ function setOutputArea(cell: CodeCell) {
   cell._output = dfOutput;
 }
 
-function setDFMetadata(cell: CodeCell) {
-  if (!cell.model.getMetadata('dfnotebook')){
-    const dfmetadata = {
-      tag: "",
-      inputVars: { ref: {}, tag_refs: {} },
-      outputVars: [],
-      persistentCode: "",
-      isReactive: true
-    };
-    cell.model.setMetadata('dfmetadata', dfmetadata);
-  }
-}
-
 export class DataflowCell<T extends ICellModel = ICellModel> extends Cell<T> {
   protected initializeDOM(): void {
     super.initializeDOM();
@@ -193,6 +180,10 @@ export abstract class DataflowAttachmentsCell<
 }
 
 export class DataflowCodeCell extends CodeCell {
+  public constructor(options: CodeCell.IOptions) {
+    super(options);
+  }
+  
   protected initializeDOM(): void {
     super.initializeDOM();
     setInputArea(this);
@@ -209,7 +200,6 @@ export class DataflowCodeCell extends CodeCell {
   initializeState(): this {
     super.initializeState();
     this.setPromptToId();
-    setDFMetadata(this);
     return this;
   }
 

@@ -4,12 +4,13 @@ import {
   InputArea,
   InputPrompt
 } from '@jupyterlab/cells';
+import { IDataflowCodeCellModel } from './model';
 
 export class DataflowInputArea extends InputArea {
   // kind of annoying as model still needs to be set later
   constructor(options: InputArea.IOptions) {
     super(options);
-    (this.prompt as DataflowInputPrompt).model = this.model;
+    (this.prompt as DataflowInputPrompt).model = this.model as IDataflowCodeCellModel | null;
   }
 
   get prompt(): DataflowInputPrompt {
@@ -18,21 +19,20 @@ export class DataflowInputArea extends InputArea {
   }
 
   set prompt(value: DataflowInputPrompt) {
-    (value as DataflowInputPrompt).model = this.model;
+    (value as DataflowInputPrompt).model = this.model as IDataflowCodeCellModel | null;
     //@ts-ignore
     this._prompt = value;
   }
 
-  public addTag(value: string | null) {
-    const dfmetadata = this.model?.getMetadata('dfnotebook');
-    dfmetadata.tag = value;
-    this.model?.setMetadata('dfmetadata', dfmetadata);
+  public addTag(value: string) {
+    const model = this.model as IDataflowCodeCellModel;
+    model.cellName = value;
     this.prompt.updatePromptNode(this.prompt.executionCount);
   }
 
-  public get tag(): string | null {
-    const dfmetadata = this.model?.getMetadata('dfnotebook');
-    return dfmetadata?.tag;
+  public get tag(): string | undefined {
+    const model = this.model as IDataflowCodeCellModel;
+    return model.cellName
   }
 }
 
@@ -50,13 +50,12 @@ export namespace DataflowInputArea {
 export class DataflowInputPrompt extends InputPrompt {
   constructor(model: ICellModel | null = null) {
     super();
-    this.model = model;
+    this.model = model as IDataflowCodeCellModel | null;
   }
 
   public updatePromptNode(value: string | null) {
-    const dfmetadata = this.model?.getMetadata('dfnotebook');
-    if (dfmetadata && dfmetadata.tag && value != '*') {
-      this.node.textContent = `[${dfmetadata.tag}]:`;
+    if (this.cellName && value !== '*') {
+      this.node.textContent = `[${this.cellName}]:`;
     } else if (value === null) {
       this.node.textContent = ' ';
     } else {
@@ -75,16 +74,23 @@ export class DataflowInputPrompt extends InputPrompt {
     this.updatePromptNode(value);
   }
 
-  get model(): ICellModel | null {
+  get cellName(): string | undefined {
+    return this.model?.cellName;
+  }
+  get tag(): string | undefined { // alias for cellName
+    return this.cellName;
+  }
+
+  get model(): IDataflowCodeCellModel | null {
     return this._model;
   }
 
-  set model(value: ICellModel | null) {
+  set model(value: IDataflowCodeCellModel | null) {
     this._model = value;
     if (this._model) {
       this.updatePromptNode(this.executionCount);
     }
   }
 
-  private _model: ICellModel | null;
+  private _model: IDataflowCodeCellModel | null;
 }
