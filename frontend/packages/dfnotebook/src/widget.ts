@@ -84,23 +84,39 @@ export class DataflowNotebook extends Notebook {
   }
 
   public initializeState() {
-    // this signal fires before the widget is added...
-    this.model?.cells.changed.connect(this.updateTagState, this);
+    this.model?.cells.changed.connect((sender, args) => {
+      if (args.type === 'add')
+        this.updateTagState([args.newIndex]);
+    });
     this.updateTagState();
   }
 
-  public updateTagState() {
-    const model = this.model as DataflowNotebookModel;
-    console.log("Updating tag state for DataflowNotebook", model?.enableTags);
-    for (const cell of this.widgets) {
-      if (cell.inputArea) {
-        (cell.inputArea as DataflowInputArea).setTagEnabled(model.enableTags);
-      } else {
-        console.warn("Cell does not have inputArea", cell);
+  public updateTagState(indices?: number[]) {
+    const tagsEnabled = (this.model as DataflowNotebookModel).enableTags;
+    if (indices === undefined)
+      indices = Array.from(this.widgets.keys());
+    for (const index of indices) {
+      let count = 0;
+      // this approach is used because the model added triggers
+      // the cell widget to be created, and that can take
+      // a few signals to complete
+      const setInputAreaTagEnabled = () => {
+        const cell = this.widgets[index];
+        if (cell.inputArea) {
+          const inputArea = cell.inputArea as DataflowInputArea;
+          inputArea.setTagEnabled(tagsEnabled);        
+        } else if (count < 10) {
+          count++;
+          requestAnimationFrame(setInputAreaTagEnabled);
+        } else {
+          console.warn("Cannot set tag enabled on input area because inputArea is not defined");
+        }
+        return false;
       }
+      requestAnimationFrame(setInputAreaTagEnabled);
     }
   }
-
+      
   public toggleTagEnabled() {
     const model = this.model as DataflowNotebookModel;
     model.enableTags = !model.enableTags;
