@@ -478,11 +478,11 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
     # after recursive call, need to increment execution_count so don't step
     # need to reset self.execution_count to store history correctly
 
-    def run_cell(self, raw_cell, uuid=None, dfkernel_data={},
+    def run_cell(self, raw_cell, uuid=None,
                  store_history=False, silent=False, shell_futures=True, cell_id=None):
         # set partial on run_cell_async
         # print("RUN CELL:", uuid, self.max_execution_count, self.execution_count)
-        self.run_cell_async = partial(self.run_cell_async_override, uuid=uuid, dfkernel_data=dfkernel_data)
+        self.run_cell_async = partial(self.run_cell_async_override, uuid=uuid)
         # self.execution_count = int(uuid, 16)
         res = super().run_cell(raw_cell, store_history=store_history, silent=silent, shell_futures=shell_futures,
             cell_id=cell_id)
@@ -492,65 +492,18 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
 
     async def run_cell_async_override(self, raw_cell: str, store_history=False,
                              silent=False, shell_futures=True, uuid=None,
-                             dfkernel_data={},
                              update_downstream_deps=False,
                              *,
                              transformed_cell: Optional[str] = None,
                              preprocessing_exc_tuple: Optional[Any] = None,
                              cell_id=None) -> ExecutionResult:
 
-        code_dict = dfkernel_data.get("code_dict", {})
-        output_tags = dfkernel_data.get("output_tags", {})
-        auto_update_flags = dfkernel_data.get("auto_update_flags", [])
-        force_cached_flags = dfkernel_data.get("force_cached_flags", [])
-        # print("CODE_DICT:", code_dict)
-        # print("ASYNC RUNNING CELL", uuid, raw_cell)
-        # print("RUN_CELL USER_NS:", self.user_ns)
         self._last_traceback = None
         self.execution_count = self.max_execution_count
         old_deps = []
 
-        if store_history:
-            self.df_controller.update_codes(code_dict)
-            self.df_controller.update_auto_update(auto_update_flags)
-            self.df_controller.update_force_cached(force_cached_flags)
-            self.df_controller.add_links(output_tags)
-            # also put the current cell into the cache and force recompute
-            if uuid not in code_dict:
-                self.df_controller.update_code(uuid, raw_cell)
-            if uuid in self.df_controller.value_cache and uuid in self.df_controller.dep_parents:
-                old_deps = self.df_controller.all_upstream(uuid)
-                for i in list(self.df_controller.dep_parents[uuid]):
-                    self.df_controller.remove_dependencies(i,uuid)
-                self.df_controller.dep_semantic_parents[uuid] = {}
-            self.df_controller.update_flags(
-                store_history=store_history,
-                silent=silent,
-                shell_futures=shell_futures,
-                update_downstream_deps=update_downstream_deps)
-
-        result_deleted_cells = self.df_controller.deleted_cells
-        self.df_controller.deleted_cells = []
-
-        #FIXME low priority possibly change how these are calculated, this can probably be moved elsewhere
-        internalnodes = []
-        for node in ast.walk(ast.parse(transformed_cell)):
-            if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)):
-                internalnodes.append(node.id)
-
-        # before run_ast_nodes runs, have some code to run, used to be in run_cell
-        # but should be able to live in run_ast_nodes...
-        # need to use a stack instead of the recursion...
-
-        # BEFORE RUN_AST_NODES CODE
-        # # displayhook exec_result changed to reflect recursion
-        # old_result = self.displayhook.exec_result
-        # self.displayhook.exec_result = result
-        # old_uuid = self.uuid
-        # self.uuid = uuid
-        # self.user_ns._start_uuid(self.uuid)
-
         self.uuid = uuid
+        self.df_controller.set_running(self.uuid)
         self.push_result()
 
         result = await super().run_cell_async(raw_cell,
@@ -565,318 +518,22 @@ class ZMQInteractiveShell(ipykernel.zmqshell.ZMQInteractiveShell):
         self.pop_result()
         uuid = self.uuid
 
-        # AFTER RUN_AST_NODES CODE
-        # # Reset this so later displayed values do not modify the
-        # # ExecutionResult
-        # self.displayhook.exec_result = old_result
-        # self.uuid = old_uuid
-        # self.user_ns._revisit_uuid(self.uuid)
-
-        # print("LAST EXECUTE SUCCEEDED?", self.last_execution_succeeded, self.uuid, uuid, file=sys.__stdout__)
-
-        if not self.last_execution_succeeded:
-            for j in self.df_controller.storeditems:
-                self.df_controller.remove_dependencies(j['parent'],
-                                                                  j['child'])
-            result.deleted_cells = result_deleted_cells
-
         if isinstance(result.result, LinkedResult):
             result.result.__sethist__(self.df_controller)
-
-        self.df_controller.storeditems = []
-
         if store_history:
             result.execution_count = int(uuid, 16)
 
-        import sys
-        # print("LAST EXECUTE SUCCEEDED?", self.last_execution_succeeded, file=sys.__stdout__)
-        # sys.stdout.flush()
-        if self.last_execution_succeeded:
-            if store_history:
-                # print("STORING HISTORY", cur_execution_count)
-                # print("STORING UPDATE VALUE:", uuid, result)
-                self.df_controller.update_value(uuid, result.result)
-                self.df_controller.set_not_stale(uuid)
-
-            if store_history:
-                cells = []
-                nodes = []
-                for uid in self.df_controller.sorted_keys():
-                    cells.append(uid)
-                if uuid in self.df_controller.value_cache:
-                    if(self.df_controller.value_cache[uuid] is not None):
-                        nodes.append('Out_'+uuid+'')
-                    if isinstance(self.df_controller.value_cache[uuid], LinkedResult):
-                        nodes = list(self.df_controller.value_cache[uuid].keys())
-                result.nodes = nodes
-                result.cells = cells
-                result.links = self.df_controller.raw_semantic_upstream(uuid)
-                result.deleted_cells = self.df_controller.deleted_cells
-
-                result.internal_nodes = internalnodes
-                # print("GOT DELETED CELLS:", result.deleted_cells, file=sys.__stdout__)
-                self.df_controller.deleted_cells = []
-
-                result.imm_upstream_deps = self.df_controller.get_semantic_upstream(uuid)
-                result.all_upstream_deps = self.df_controller.all_upstream(uuid)
-                result.update_downstreams = []
-                for i in set(self.df_controller.all_upstream(uuid)+old_deps):
-                    result.update_downstreams.append({'key':i, 'data':self.df_controller.get_downstream(i)})
-                result.imm_downstream_deps = self.df_controller.get_downstream(uuid)
-                result.all_downstream_deps = self.df_controller.all_downstream(uuid)
+        result.deleted_cells = self.df_controller.pop_deleted_cells()
+        if not self.last_execution_succeeded:
+            self.df_controller.set_failed(uuid)
+        else: # last_execution_succeeded:
+            self.df_controller.set_result(uuid, result.result)
+            result.df_edges = self.df_controller.graph.edge_list()
 
             # run auto_updates
-            self.df_controller.run_auto_updates(uuid)
-        return result
+            self.df_controller.downstream_update(uuid)
 
-    # def run_cell(self, raw_cell, store_history=False, silent=False, shell_futures=True,
-    #              uuid=None, dfkernel_data={}, update_downstream_deps=False):
-    #     """Run a complete IPython cell.
-    #
-    #     Parameters
-    #     ----------
-    #     raw_cell : str
-    #       The code (including IPython code such as %magic functions) to run.
-    #     store_history : bool
-    #       If True, the raw and translated cell will be stored in IPython's
-    #       history. For user code calling back into IPython's machinery, this
-    #       should be set to False.
-    #     silent : bool
-    #       If True, avoid side-effects, such as implicit displayhooks and
-    #       and logging.  silent=True forces store_history=False.
-    #     shell_futures : bool
-    #       If True, the code will share future statements with the interactive
-    #       shell. It will both be affected by previous __future__ imports, and
-    #       any __future__ imports in the code will affect the shell. If False,
-    #       __future__ imports are not shared in either direction.
-    #
-    #     Returns
-    #     -------
-    #     result : :class:`ExecutionResult`
-    #     """
-    #
-    #     code_dict = dfkernel_data.get("code_dict", {})
-    #     output_tags = dfkernel_data.get("output_tags", {})
-    #     auto_update_flags = dfkernel_data.get("auto_update_flags", [])
-    #     force_cached_flags = dfkernel_data.get("force_cached_flags", [])
-    #     # print("CODE_DICT:", code_dict)
-    #     #print("RUNNING CELL", uuid, raw_cell)
-    #     # print("RUN_CELL USER_NS:", self.user_ns)
-    #     self._last_traceback = None
-    #     old_deps = []
-    #
-    #     if store_history:
-    #         self.df_controller.update_codes(code_dict)
-    #         self.df_controller.update_auto_update(auto_update_flags)
-    #         self.df_controller.update_force_cached(force_cached_flags)
-    #         self.user_ns._add_links(output_tags)
-    #         # also put the current cell into the cache and force recompute
-    #         if uuid not in code_dict:
-    #             self.df_controller.update_code(uuid, raw_cell)
-    #         if uuid in self.df_controller.value_cache and uuid in self.df_controller.dep_parents:
-    #             old_deps = self.df_controller.all_upstream(uuid)
-    #             for i in list(self.df_controller.dep_parents[uuid]):
-    #                 self.df_controller.remove_dependencies(i,uuid)
-    #             self.df_controller.dep_semantic_parents[uuid] = {}
-    #         self.df_controller.update_flags(
-    #             store_history=store_history,
-    #             silent=silent,
-    #             shell_futures=shell_futures,
-    #             update_downstream_deps=update_downstream_deps)
-    #
-    #     info = ExecutionInfo(
-    #         raw_cell, store_history, silent, shell_futures)
-    #     result = ExecutionResult(info)
-    #
-    #     result.deleted_cells = self.df_controller.deleted_cells
-    #     self.df_controller.deleted_cells = []
-    #
-    #
-    #     if (not raw_cell) or raw_cell.isspace():
-    #         self.last_execution_succeeded = True
-    #         return result
-    #
-    #     if silent:
-    #         store_history = False
-    #
-    #     if store_history:
-    #         result.execution_count = uuid
-    #
-    #     def error_before_exec(value):
-    #         result.error_before_exec = value
-    #         self.last_execution_succeeded = False
-    #         return result
-    #
-    #     self.events.trigger('pre_execute')
-    #     if not silent:
-    #         self.events.trigger('pre_run_cell')
-    #
-    #     # If any of our input transformation (input_transformer_manager or
-    #     # prefilter_manager) raises an exception, we store it in this variable
-    #     # so that we can display the error after logging the input and storing
-    #     # it in the history.
-    #     preprocessing_exc_tuple = None
-    #     try:
-    #         # Static input transformations
-    #         cell = self.input_transformer_manager.transform_cell(raw_cell)
-    #     except SyntaxError:
-    #         preprocessing_exc_tuple = sys.exc_info()
-    #         cell = raw_cell  # cell has to exist so it can be stored/logged
-    #     else:
-    #         if len(cell.splitlines()) == 1:
-    #             # Dynamic transformations - only applied for single line commands
-    #             with self.builtin_trap:
-    #                 try:
-    #                     # use prefilter_lines to handle trailing newlines
-    #                     # restore trailing newline for ast.parse
-    #                     cell = self.prefilter_manager.prefilter_lines(cell) + '\n'
-    #                 except Exception:
-    #                     # don't allow prefilter errors to crash IPython
-    #                     preprocessing_exc_tuple = sys.exc_info()
-    #
-    #     # Store raw and processed history
-    #     if store_history:
-    #         self.execution_count += 1
-    #         # store cur_execution_count because of recursion
-    #         cur_execution_count = self.execution_count
-    #         # print("STORING INPUTS:", self.execution_count)
-    #         self.history_manager.store_inputs(self.execution_count,
-    #                                           cell, raw_cell)
-    #     if not silent:
-    #         self.logger.log(cell, raw_cell)
-    #
-    #     # Display the exception if input processing failed.
-    #     if preprocessing_exc_tuple is not None:
-    #         self.showtraceback(preprocessing_exc_tuple)
-    #         # if store_history:
-    #         #     self.execution_count += 1
-    #         return error_before_exec(preprocessing_exc_tuple[2])
-    #
-    #     # Our own compiler remembers the __future__ environment. If we want to
-    #     # run code with a separate __future__ environment, use the default
-    #     # compiler
-    #     compiler = self.compile if shell_futures else CachingCompiler()
-    #
-    #     with self.builtin_trap:
-    #         # TODO seems that uuid is more appropriate than execution_count here
-    #         cell_name = self.compile.cache(cell, uuid)
-    #
-    #         with self.display_trap:
-    #             # Compile to bytecode
-    #             try:
-    #                 code_ast = compiler.ast_parse(cell, filename=cell_name)
-    #             except self.custom_exceptions as e:
-    #                 etype, value, tb = sys.exc_info()
-    #                 self.CustomTB(etype, value, tb)
-    #                 return error_before_exec(e)
-    #             except IndentationError as e:
-    #                 self.showindentationerror()
-    #                 # if store_history:
-    #                 #     self.execution_count += 1
-    #                 return error_before_exec(e)
-    #             except (OverflowError, SyntaxError, ValueError, TypeError,
-    #                     MemoryError) as e:
-    #                 self.showsyntaxerror()
-    #                 # if store_history:
-    #                 #     self.execution_count += 1
-    #                 return error_before_exec(e)
-    #
-    #             # Apply AST transformations
-    #             try:
-    #                 code_ast = self.transform_ast(code_ast)
-    #             except InputRejected as e:
-    #                 self.showtraceback()
-    #                 # if store_history:
-    #                 #     self.execution_count += 1
-    #                 return error_before_exec(e)
-    #
-    #             internalnodes = []
-    #             for node in ast.walk(code_ast):
-    #                 if(isinstance(node,ast.Name) and isinstance(node.ctx,ast.Store)):
-    #                     internalnodes.append(node.id)
-    #
-    #             # Give the displayhook a reference to our ExecutionResult so it
-    #             # can fill in the output value.
-    #
-    #             # displayhook exec_result changed to reflect recursion
-    #             old_result = self.displayhook.exec_result
-    #             self.displayhook.exec_result = result
-    #             old_uuid = self.uuid
-    #             self.uuid = uuid
-    #             self.user_ns._start_uuid(self.uuid)
-    #
-    #             # user_ns = copy.copy(self.user_ns)
-    #
-    #             # Execute the user code
-    #             interactivity = "none" if silent else self.ast_node_interactivity
-    #             has_raised = self.run_ast_nodes(code_ast.body, cell_name,
-    #                                             interactivity=interactivity, compiler=compiler, result=result)
-    #
-    #             self.last_execution_succeeded = not has_raised
-    #
-    #             # Reset this so later displayed values do not modify the
-    #             # ExecutionResult
-    #             self.displayhook.exec_result = old_result
-    #             self.uuid = old_uuid
-    #             self.user_ns._revisit_uuid(self.uuid)
-    #
-    #             # self.user_ns = user_ns
-    #
-    #             if(not self.last_execution_succeeded):
-    #                 for j in self.df_controller.storeditems:
-    #                     self.df_controller.remove_dependencies(j['parent'],j['child'])
-    #
-    #             if isinstance(result.result, LinkedResult):
-    #                 result.result.__sethist__(self.df_controller)
-    #
-    #             self.df_controller.storeditems = []
-    #             self.events.trigger('post_execute')
-    #             if not silent:
-    #                 self.events.trigger('post_run_cell')
-    #
-    #     if not has_raised:
-    #         if store_history:
-    #             # Write output to the database. Does nothing unless
-    #             # history output logging is enabled.
-    #             # print("STORING HISTORY", cur_execution_count)
-    #             self.history_manager.store_output(cur_execution_count)
-    #             # print("STORING UPDATE VALUE:", uuid, result)
-    #             self.df_controller.update_value(uuid, result.result)
-    #             self.df_controller.set_not_stale(uuid)
-    #
-    #             # Each cell is a *single* input, regardless of how many lines it has
-    #             # self.execution_count += 1
-    #
-    #         if store_history:
-    #             cells = []
-    #             nodes = []
-    #             for uid in self.df_controller.sorted_keys():
-    #                 cells.append(uid)
-    #             if uuid in self.df_controller.value_cache:
-    #                 if(self.df_controller.value_cache[uuid] is not None):
-    #                     nodes.append('Out_'+uuid+'')
-    #                 if isinstance(self.df_controller.value_cache[uuid], LinkedResult):
-    #                     nodes = list(self.df_controller.value_cache[uuid].keys())
-    #             result.nodes = nodes
-    #             result.cells = cells
-    #             result.links = self.df_controller.raw_semantic_upstream(uuid)
-    #             result.deleted_cells = self.df_controller.deleted_cells
-    #             self.df_controller.deleted_cells = []
-    #             result.internal_nodes = internalnodes
-    #
-    #             result.imm_upstream_deps = self.df_controller.get_semantic_upstream(uuid)
-    #             result.all_upstream_deps = self.df_controller.all_upstream(uuid)
-    #             result.update_downstreams = []
-    #             for i in set(self.df_controller.all_upstream(uuid)+old_deps):
-    #                 result.update_downstreams.append({'key':i, 'data':self.df_controller.get_downstream(i)})
-    #             result.imm_downstream_deps = self.df_controller.get_downstream(uuid)
-    #             result.all_downstream_deps = self.df_controller.all_downstream(uuid)
-    #
-    #         # run auto_updates
-    #         self.df_controller.run_auto_updates(uuid)
-    #
-    #
-    #     return result
+        return result
 
     def get_linked_vars(self, node):
         create_node = True
