@@ -235,6 +235,10 @@ class DataflowController(object):
     def cell_names_inv(self):
         return {cell.name: cell_id for cell_id, cell in self.cells.items() if cell.name is not None}
 
+    @property
+    def df_graph_edges(self):
+        return self.graph.edge_list()
+
     def update_flags(self, **kwargs):
         self.flags.update(kwargs)
         # self.flags['silent'] = True

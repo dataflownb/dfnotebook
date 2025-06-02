@@ -404,7 +404,7 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         if hasattr(res, "deleted_cells"):
             reply_content["deleted_cells"] = res.deleted_cells
         reply_content["cell_data_dict"] = self.df_controller.cells_to_dict()
-        reply_content["edge_list"] = self.df_controller.df_edges
+        reply_content["df_graph_edges"] = self.df_controller.df_graph_edges
 
         if res.success:
             reply_content["status"] = "ok"
