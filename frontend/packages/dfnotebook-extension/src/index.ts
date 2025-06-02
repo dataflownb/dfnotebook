@@ -712,7 +712,7 @@ const panelToolbar: JupyterFrontEndPlugin<void> = {
           // FIXME actually make the tag-cell buttons invisible?
           const cellsArray = Array.from(notebook.widgets);
           cellsArray.forEach(cAny => {
-            const dfmetadata = cAny.model.getMetadata('dfmetadata');
+            const dfmetadata = cAny.model.getMetadata('dfnotebook');
             if (cAny.model.type == 'code' && dfmetadata.tag){
               const inputArea = (cAny as any).inputArea;
               let currTag = dfmetadata.tag;
@@ -2686,7 +2686,7 @@ function addCommands(
         for (let index = 0; index < cells.length; index++) {
           let cAny = cells.get(index)
           if (cAny.type == 'code'){
-            const dfmetadata = cAny.getMetadata('dfmetadata');
+            const dfmetadata = cAny.getMetadata('dfnotebook');
             const cellTagvalue = dfmetadata.tag;
             if(cellTagvalue){
               existingCellTags.add(cellTagvalue);
@@ -2790,7 +2790,7 @@ function addCommands(
         for (let index = 0; index < cells.length; index++) {
           let cAny = cells.get(index)
           if (cAny.type == 'code'){
-            const dfmetadata = cAny.getMetadata('dfmetadata');
+            const dfmetadata = cAny.getMetadata('dfnotebook');
             const cellTagvalue = dfmetadata.tag;
             if(cellTagvalue){
               existingCellTags.add(cellTagvalue);
@@ -2909,7 +2909,7 @@ function addCommands(
             if (notebook.cells.get(index).type === 'code') {
               const c = cAny as ICodeCellModel;
               const cId = truncateCellId(c.id);
-              const dfmetadata = c.getMetadata('dfmetadata');
+              const dfmetadata = c.getMetadata('dfnotebook');
               if (dfmetadata.tag){
                 all_tags[cId] = dfmetadata.tag;
               }
@@ -2919,7 +2919,7 @@ function addCommands(
           for (let index = 0; index < notebook.cells.length; index++) {
             const cAny = notebook.cells.get(index) as ICodeCellModel;
             if (cAny.type == 'code') {
-              const dfmetadata = notebook.cells.get(index).getMetadata('dfmetadata');
+              const dfmetadata = notebook.cells.get(index).getMetadata('dfnotebook');
               let inputVarsMetadata = dfmetadata.inputVars;
               if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
                 const refValue = inputVarsMetadata.ref as { [key: string]: any };
@@ -2984,7 +2984,7 @@ function addCommands(
     caption: trans.__('Reactive'),
     execute: args => {
       const cell = tracker.currentWidget?.content.activeCell as CodeCell;
-      const metadata = cell.model.getMetadata('dfmetadata');
+      const metadata = cell.model.getMetadata('dfnotebook');
       metadata.isReactive = !metadata.isReactive;
       cell.model.setMetadata('dfmetadata', metadata);
       commands.notifyCommandChanged('toolbar-button:reactive-cell')
@@ -3001,7 +3001,7 @@ function addCommands(
     icon: args => {
       if (!args.toolbar) return undefined;
       const cell = tracker.currentWidget?.content.activeCell as CodeCell;
-      const metadata = cell.model.getMetadata('dfmetadata');
+      const metadata = cell.model.getMetadata('dfnotebook');
 
       // assume reactive unless otherwise indicated
       return metadata?.isReactive ?? true ? nonReactiveIcon : reactiveIcon;
@@ -3071,7 +3071,7 @@ function updateNotebookCells(notebook: DataflowNotebookModel, content: any, cell
 
       //Updating the dependent cell's df-metadata when any cell is tagged/untagged
       if (cellUUID && !hideTags) {
-        const dfmetadata = cAny.getMetadata('dfmetadata');
+        const dfmetadata = cAny.getMetadata('dfnotebook');
         const inputVarsMetadata = dfmetadata.inputVars;
         if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
           const refValue = inputVarsMetadata.ref as { [key: string]: any };

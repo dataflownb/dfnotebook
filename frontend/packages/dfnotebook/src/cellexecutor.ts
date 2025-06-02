@@ -250,7 +250,7 @@ import { truncateCellId } from '@dfnotebook/dfutils';
 
   function updateCellMetadata(cellModel: CodeCellModel, content: any, allTags: { [key: string]: string }): void {
     const cId = truncateCellId(cellModel.id);
-    const dfmetadata = cellModel.getMetadata('dfmetadata') || {};
+    const dfmetadata = cellModel.getMetadata('dfnotebook') || {};
 
     if (content.persistent_code?.[cId]) {
       dfmetadata.persistentCode = content.persistent_code[cId];
@@ -293,7 +293,7 @@ import { truncateCellId } from '@dfnotebook/dfutils';
 
   function resetCellPrompt(notebook: DataflowNotebookModel, cell: Cell) {
     const currInputArea = cell.inputArea as any;
-    const dfmetadata = cell.model?.getMetadata('dfmetadata');
+    const dfmetadata = cell.model?.getMetadata('dfnotebook');
     const currTag = dfmetadata.tag;
     if(currInputArea){
       if(!notebook.getMetadata('enable_tags')){
@@ -312,7 +312,7 @@ import { truncateCellId } from '@dfnotebook/dfutils';
 
     cellsArray.forEach(cell => {
       if (cell.type === 'code') {
-        const dfmetadata = cell.getMetadata('dfmetadata');
+        const dfmetadata = cell.getMetadata('dfnotebook');
         const tag = dfmetadata?.tag;
         if (tag) {
           const cId = truncateCellId(cell.id);
@@ -340,7 +340,7 @@ import { truncateCellId } from '@dfnotebook/dfutils';
       if (cell.type === 'code') {
         const c = cell as ICodeCellModel;
         const cId = truncateCellId(c.id);
-        const dfmetadata = c.getMetadata('dfmetadata');
+        const dfmetadata = c.getMetadata('dfnotebook');
         if(!dfmetadata.persistentCode && cId != cellUUID)
         {
           cellIdModelMap[cId] = c;

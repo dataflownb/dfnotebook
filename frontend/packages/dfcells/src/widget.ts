@@ -122,7 +122,7 @@ function setOutputArea(cell: CodeCell) {
 }
 
 function setDFMetadata(cell: CodeCell) {
-  if (!cell.model.getMetadata('dfmetadata')){
+  if (!cell.model.getMetadata('dfnotebook')){
     const dfmetadata = {
       tag: "",
       inputVars: { ref: {}, tag_refs: {} },
@@ -165,8 +165,8 @@ export class DataflowMarkdownCell extends MarkdownCell {
     super.initializeDOM();
     setInputArea(this);
     this.addClass('df-cell');
-    if(this.model.getMetadata('dfmetadata')){
-      this.model.deleteMetadata('dfmetadata')
+    if(this.model.getMetadata('dfnotebook')){
+      this.model.deleteMetadata('dfnotebook')
     }
   }
 }
@@ -176,8 +176,8 @@ export class DataflowRawCell extends RawCell {
     super.initializeDOM();
     setInputArea(this);
     this.addClass('df-cell');
-    if(this.model.getMetadata('dfmetadata')){
-      this.model.deleteMetadata('dfmetadata')
+    if(this.model.getMetadata('dfnotebook')){
+      this.model.deleteMetadata('dfnotebook')
     }
   }
 }
