@@ -34,6 +34,11 @@ export class DataflowInputArea extends InputArea {
     const model = this.model as IDataflowCodeCellModel;
     return model.cellName
   }
+
+  public setTagEnabled(value: boolean) {
+    this.prompt.showTag = value;
+    this.prompt.updatePromptNode(this.prompt.executionCount);
+  }
 }
 
 export namespace DataflowInputArea {
@@ -54,7 +59,7 @@ export class DataflowInputPrompt extends InputPrompt {
   }
 
   public updatePromptNode(value: string | null) {
-    if (this.cellName && value !== '*') {
+    if (this.showTag && this.cellName && value !== '*') {
       this.node.textContent = `[${this.cellName}]:`;
     } else if (value === null) {
       this.node.textContent = ' ';
@@ -93,4 +98,5 @@ export class DataflowInputPrompt extends InputPrompt {
   }
 
   private _model: IDataflowCodeCellModel | null;
+  public showTag: boolean = false;
 }
