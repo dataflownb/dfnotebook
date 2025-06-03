@@ -95,7 +95,10 @@ export class DataflowCodeCellModel extends CodeCellModel implements IDataflowCod
 
     public set cellName(name: string) {
         const dfmetadata = this.getDataflowMetadata();
-        dfmetadata.name = name;
+        if (name === undefined || name === null || name === '')
+            dfmetadata.name = undefined;
+        else
+            dfmetadata.name = name;
         this.setDataflowMetadata(dfmetadata);
     }
 

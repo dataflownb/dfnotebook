@@ -6,10 +6,10 @@ import {
   IAttachmentsCellModel,
   ICellModel,
   IInputPrompt,
+  InputPrompt,
   MarkdownCell,
   RawCell
 } from '@jupyterlab/cells';
-import { DataflowInputArea, DataflowInputPrompt } from './inputarea';
 import { IOutputAreaModel, IOutputPrompt } from '@jupyterlab/outputarea';
 import {
   DataflowOutputArea,
@@ -24,45 +24,12 @@ import { Panel } from '@lumino/widgets';
 // FIXME need to add this back when dfgraph is working
 import { Manager as GraphManager } from '@dfnotebook/dfgraph';
 import { IDataflowCodeCellModel } from './model';
-/**
- * The CSS class added to the cell input area.
- */
-const CELL_INPUT_AREA_CLASS = 'jp-Cell-inputArea';
+import { IMapChange } from '@jupyter/ydoc';
 
 /**
  * The CSS class added to the cell output area.
  */
 const CELL_OUTPUT_AREA_CLASS = 'jp-Cell-outputArea';
-
-function setInputArea<T extends ICellModel = ICellModel>(cell: Cell) {
-  // FIXME may be able to get panel via (this.layout as PanelLayout).widgets?
-  //@ts-expect-error
-  const inputWrapper = cell._inputWrapper as Panel;
-  const input = cell.inputArea;
-
-  // find the input area widget
-  let inputIdx = -1;
-  if (input) {
-    const { id } = input;
-    inputWrapper.widgets.forEach((widget, idx) => {
-      if (widget.id === id) {
-        inputIdx = idx;
-      }
-    });
-  }
-
-  const dfInput = new DataflowInputArea({
-    model: cell.model,
-    contentFactory: cell.contentFactory,
-    editorOptions: { config: cell.editorConfig }
-  });
-  dfInput.addClass(CELL_INPUT_AREA_CLASS);
-
-  inputWrapper.insertWidget(inputIdx, dfInput);
-  input?.dispose();
-  //@ts-expect-error
-  cell._input = dfInput;
-}
 
 function setOutputArea(cell: CodeCell) {
   //@ts-expect-error
@@ -124,7 +91,6 @@ function setOutputArea(cell: CodeCell) {
 export class DataflowCell<T extends ICellModel = ICellModel> extends Cell<T> {
   protected initializeDOM(): void {
     super.initializeDOM();
-    setInputArea(this);
     this.addClass('df-cell');
   }
 }
@@ -135,7 +101,7 @@ export namespace DataflowCell {
      * Create an input prompt.
      */
     createInputPrompt(): IInputPrompt {
-      return new DataflowInputPrompt();
+      return new InputPrompt();
     }
 
     /**
@@ -150,7 +116,6 @@ export namespace DataflowCell {
 export class DataflowMarkdownCell extends MarkdownCell {
   protected initializeDOM(): void {
     super.initializeDOM();
-    setInputArea(this);
     this.addClass('df-cell');
     if(this.model.getMetadata('dfnotebook')){
       this.model.deleteMetadata('dfnotebook')
@@ -161,7 +126,6 @@ export class DataflowMarkdownCell extends MarkdownCell {
 export class DataflowRawCell extends RawCell {
   protected initializeDOM(): void {
     super.initializeDOM();
-    setInputArea(this);
     this.addClass('df-cell');
     if(this.model.getMetadata('dfnotebook')){
       this.model.deleteMetadata('dfnotebook')
@@ -174,7 +138,6 @@ export abstract class DataflowAttachmentsCell<
 > extends AttachmentsCell<T> {
   protected initializeDOM(): void {
     super.initializeDOM();
-    setInputArea(this);
     this.addClass('df-cell');
   }
 }
@@ -182,24 +145,31 @@ export abstract class DataflowAttachmentsCell<
 export class DataflowCodeCell extends CodeCell {
   public constructor(options: CodeCell.IOptions) {
     super(options);
+    this.model.metadataChanged.connect(this.tagMaybeChanged, this);
   }
   
   protected initializeDOM(): void {
     super.initializeDOM();
-    setInputArea(this);
     setOutputArea(this);
-    this.setPromptToId();
+    this.setPrompt();
     this.addClass('df-cell');
   }
 
-  public setPromptToId() {
-    // FIXME move this to a function to unify with the code in dfnotebook/actions.tsx
-    this.setPrompt(`${truncateCellId(this.model.id) || ''}`);
+  setPrompt(value?: string): void {
+    if (value === '*') {
+      super.setPrompt(value);
+    } else {
+      if (this.tagEnabled && this.model.cellName) {
+        super.setPrompt(this.model.cellName)
+      } else {
+        super.setPrompt(this.model.cellId);
+      }
+    }
   }
 
   initializeState(): this {
     super.initializeState();
-    this.setPromptToId();
+    this.setPrompt();
     return this;
   }
 
@@ -207,12 +177,25 @@ export class DataflowCodeCell extends CodeCell {
     super.onStateChanged(model, args);
     switch (args.name) {
       case 'executionCount':
-        this.setPromptToId();
+        this.setPrompt(args.newValue);
         break;
       default:
         break;
     }
   }
+
+  tagMaybeChanged(model: ICellModel, args: IMapChange) {
+    switch (args.key) {
+      case 'dfnotebook':
+        this.setPrompt();
+    }
+  }
+
+  get model(): IDataflowCodeCellModel {
+    return super.model as IDataflowCodeCellModel;
+  }
+
+  tagEnabled: boolean = false;
 }
 
 export namespace DataflowCodeCell {
@@ -354,8 +337,7 @@ export namespace DataflowCodeCell {
       // If we started executing, and the cell is still indicating this
       // execution, clear the prompt.
       if (future && !cell.isDisposed && cell.outputArea.future === future) {
-        // FIXME is this necessary?
-        cell.setPromptToId();
+        cell.setPrompt();
       }
       throw e;
     }

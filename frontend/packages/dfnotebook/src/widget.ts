@@ -15,7 +15,6 @@ import {
   DataflowCodeCell,
   DataflowMarkdownCell,
   DataflowRawCell,
-  DataflowInputArea,
   DataflowCodeCellModel,
 } from '@dfnotebook/dfcells';
 import { DataflowNotebookModel } from './model';
@@ -96,24 +95,14 @@ export class DataflowNotebook extends Notebook {
     if (indices === undefined)
       indices = Array.from(this.widgets.keys());
     for (const index of indices) {
-      let count = 0;
-      // this approach is used because the model added triggers
-      // the cell widget to be created, and that can take
-      // a few signals to complete
-      const setInputAreaTagEnabled = () => {
-        const cell = this.widgets[index];
-        if (cell.inputArea) {
-          const inputArea = cell.inputArea as DataflowInputArea;
-          inputArea.setTagEnabled(tagsEnabled);        
-        } else if (count < 10) {
-          count++;
-          requestAnimationFrame(setInputAreaTagEnabled);
-        } else {
-          console.warn("Cannot set tag enabled on input area because inputArea is not defined");
+      requestAnimationFrame(() => {
+        const anyCell = this.widgets[index];
+        if (anyCell.model.type == 'code') {
+          const cell = anyCell as DataflowCodeCell;
+          cell.tagEnabled = tagsEnabled;
+          cell.setPrompt();
         }
-        return false;
-      }
-      requestAnimationFrame(setInputAreaTagEnabled);
+      });
     }
   }
       
