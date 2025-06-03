@@ -286,6 +286,7 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         self.log.debug("%s", reply_msg)
 
         if not silent and reply_msg["content"]["status"] == "error" and stop_on_error:
+            # FIXME _abort_queues changes in 7.x
             self._abort_queues()
 
         return res
