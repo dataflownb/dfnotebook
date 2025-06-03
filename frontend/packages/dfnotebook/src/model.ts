@@ -150,10 +150,12 @@ export class DataflowNotebookModel extends NotebookModel {
 
   updateDataflowCodeCellData(codeCellData: { [cell_id: string]: IDataflowCellData }): void {
     this.sharedModel.transact(() => {
-      for (const cellModel of this.codeCellModelArray) {
-        const cellData = codeCellData[cellModel.cellId];
-        if (cellData)
-          cellModel.updateDataflowCellData(cellData);
+      if (codeCellData) {
+        for (const cellModel of this.codeCellModelArray) {
+          const cellData = codeCellData[cellModel.cellId];
+          if (cellData)
+            cellModel.updateDataflowCellData(cellData);
+        }
       }
     });
   }
