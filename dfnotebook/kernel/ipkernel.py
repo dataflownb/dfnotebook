@@ -31,7 +31,8 @@ from dfnbutils import (
     ref_replacer,
     identifier_replacer,
     dollar_replacer,
-    get_references
+    dollar_disp_replacer,
+    dollar_disp_no_tag_replacer,
 )
 
 
@@ -55,7 +56,7 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         self.shell.display_pub.get_execution_count = lambda: int(
             self.execution_count, 16
         )
-        get_ipython().kernel.comm_manager.register_target('dfcode', self.dfcode_comm)
+        self.comm_manager.register_target('dfcode', self.dfcode_comm)
         
         # # first use nest_ayncio for nested async, then add asyncio.Future to tornado
         # nest_asyncio.apply()
@@ -69,6 +70,10 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         #         asyncio.Future,)
 
     @property
+    def df_controller(self):
+        return self.shell.df_controller
+
+    @property
     def execution_count(self):
         # return self.shell.execution_count
         return self.shell.uuid
@@ -78,34 +83,78 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         # Ignore the incrememnting done by KernelBase, in favour of our shell's
         # execution counter.
         pass
-
-    # def _publish_execute_input(self, code, parent, execution_count):
-    #     # go through nodes and for each node that exists in self.shell's history
-    #     # as a load, change it to a var$ce1 reference
-    #     # FIXME deal with scoping
-    #
-    #     super()._publish_execute_input(code, parent, execution_count)
-
     
     def dfcode_comm(self, comm, msg):
         @comm.on_msg
         def _recv(msg):
             try:
-                update_latest_executed_code = False
                 dfMetadata = msg['content']['data']['dfMetadata']
-                self.shell.input_tags = dfMetadata['input_tags']
+                update_executed_code = msg['content']['data'].get('updateExecutedCode', False)
+                tag_remap = msg['content']['data'].get('tagRemap', {})
+                use_tags = msg['content']['data'].get('useTags', False)
 
-                if msg['content']['data'].get('updateExecutedCode') and msg['content']['data']['updateExecutedCode']:
-                    update_latest_executed_code = True
-
-                code_dict, executed_code_dict = self.update_code_cells(dfMetadata, update_latest_executed_code)
-                comm.send({'code_dict': code_dict, 'executed_code_dict': executed_code_dict})
+                cell_data_dict = self.update_code_cells(dfMetadata['cell_data_dict'], update_executed_code, 
+                    use_tags=use_tags, tag_remap=tag_remap)
+                comm.send({'cell_data_dict': cell_data_dict})
             except Exception as e:
                 self.log.error('Error in conversion')
                 self.log.error(e)
                 comm.send({'error': str(e)})
             finally:
                 comm.close()
+
+    def convert_code(self, code, uuid, use_tags=False, input_refs=None, tag_remap={}):
+        if use_tags:
+            disp_replacer = dollar_disp_replacer
+        else:
+            disp_replacer = dollar_disp_no_tag_replacer
+        persistent_code = code
+        
+        dollar_converted = False
+        orig_code = code
+        parsed_code = ''
+        new_input_refs = {}
+
+        try:
+            code = convert_dollar(
+                code, self.df_controller, uuid, identifier_replacer, self.df_controller.output_tags,
+                input_tags=self.df_controller.input_tags, tag_remap=tag_remap
+            )
+            dollar_converted = True
+            parsed_code = code
+            code = ground_refs(
+                code, self.df_controller, uuid, identifier_replacer, self.df_controller.input_tags, output_tags=self.df_controller.output_tags,
+                cell_refs=input_refs
+            )
+            persistent_code, new_input_refs = convert_identifier(code, dollar_replacer)
+            code, _ = convert_identifier(code, disp_replacer)
+            dollar_converted = False
+        except SyntaxError as e:
+            if dollar_converted:
+                code = orig_code
+                parsed_code = ''
+            pass
+        except TokenError as e:
+            # ignore this for now, catch it in do_execute
+            parsed_code = ''
+            pass
+
+        return {
+            'persistent_code': persistent_code, 
+            'code': code,
+            'input_refs': new_input_refs
+        }
+
+    def process_cell_data(self, cell_data_dict, use_tags=False):
+        for cell_id, cell_data in cell_data_dict.items():
+            updated_cell_data = self.convert_code(cell_data.pop('code'), cell_id,
+                use_tags=use_tags,
+            )
+            cell_data_dict[cell_id].update(updated_cell_data)
+
+        self.df_controller.update_cells(cell_data_dict)
+        self.df_controller.add_links(self.df_controller.output_tags)
+
 
     async def execute_request(self, stream, ident, parent):
         """handle an execute_request"""
@@ -126,44 +175,24 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         # grab and remove dfkernel_data from user_expressions
         # there just for convenience of not modifying the msg protocol
         dfkernel_data = user_expressions.pop("__dfkernel_data__", {})
-
-        input_tags = dfkernel_data.get("input_tags", {})
-        # print("SETTING INPUT TAGS:", input_tags, file=sys.__stdout__)
-
-        output_tags= defaultdict(set)
-        if dfkernel_data.get('output_tags'):
-            for op_id, op_tags in dfkernel_data['output_tags'].items():
-                for tag in op_tags:
-                    output_tags[tag].add(op_id)
-            
-        
-        self._output_tags = dict(output_tags)
-        self.shell.input_tags = input_tags
+        self.process_cell_data(dfkernel_data['cell_data_dict'], dfkernel_data.get('use_tags', False))
+        self.df_controller.reset_did_run()
 
         self._outer_stream = stream
         self._outer_ident = ident
         self._outer_parent = parent
         self._outer_stop_on_error = stop_on_error
         self._outer_allow_stdin = allow_stdin
-        self._outer_dfkernel_data = dfkernel_data
-        self._identifier_refs = {}
-        self._persistent_code = {}
-        self._expectedUUID = dfkernel_data.get("expectedUUID")
         
         res = await self.inner_execute_request(
             code,
-            dfkernel_data.get("uuid"),
+            dfkernel_data["uuid"],
             silent,
             store_history,
             user_expressions,
         )
 
-        # self._outer_stream = None
-        # self._outer_ident = None
-        # self._outer_parent = None
-        # self._outer_stop_on_error = None
-        # self._outer_allow_stdin = None
-        # self._outer_dfkernel_data = None
+        # print("DONE RUNNING CELL:", dfkernel_data["uuid"])
 
     async def inner_execute_request(
         self, code, uuid, silent, store_history=True, user_expressions=None
@@ -173,63 +202,28 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         parent = self._outer_parent
         stop_on_error = self._outer_stop_on_error
         allow_stdin = self._outer_allow_stdin
-        dfkernel_data = self._outer_dfkernel_data
 
-        input_tags = dfkernel_data.get("input_tags", {})
+        execution_count = int(uuid, 16)
 
         # FIXME does it make sense to reparent a request?
         metadata = self.init_metadata(parent)
 
-        # print("INNER EXECUTE:", uuid)
+        cell = self.df_controller.cells[uuid]
 
-        try:
-            execution_count = int(uuid, 16)
-        except:
-            # FIXME for debugging
-            uuid = "1"
-            execution_count = 1
-        dollar_converted = False
-        orig_code = code
-        parsed_code = ''
-        try:
-            code = convert_dollar(
-                code, self.shell.dataflow_state, uuid, identifier_replacer, input_tags
-            )
-            dollar_converted = True
-            parsed_code = code;
-            code = ground_refs(
-                code, self.shell.dataflow_state, uuid, identifier_replacer, input_tags, output_tags=self._output_tags
-            )
-            self._identifier_refs[uuid] = get_references(code)
-            self._persistent_code[uuid] = convert_identifier(code, dollar_replacer, input_tags={})
-
-            code = convert_identifier(code, dollar_replacer, input_tags=input_tags)
-            dollar_converted = False
-        except SyntaxError as e:
-            if dollar_converted:
-                code = orig_code
-                parsed_code = ''
-            pass
-        except TokenError as e:
-            # ignore this for now, catch it in do_execute
-            parsed_code = ''
-            pass
-
-        #print("FIRST CODE:", code)
+        # self.log.error(f"DISPLAY CODE: {cell.code} PERSISTENT CODE: {cell.persistent_code}")
         if not silent:
-            if len(parsed_code) > 0:
-                display_code = ground_refs(parsed_code, self.shell.dataflow_state, uuid, identifier_replacer, input_tags, output_tags=self._output_tags, display_code=True)
-                display_code = convert_identifier(display_code, dollar_replacer, input_tags=input_tags)
-                self._publish_execute_input(display_code, parent, execution_count)
-            else:
-                self._publish_execute_input(code, parent, execution_count)
+            self._publish_execute_input(cell.code, parent, execution_count)
+        else:
+            self._publish_execute_input(cell.persistent_code, parent, execution_count)
 
-        # update the code_dict with the modified code
-        dfkernel_data["code_dict"][uuid] = code
-        # convert all tilded code
+        # set the executed code to the code we are running
+        cell.executed_code = cell.code
+
         try:
+            # no remaps going on here, just persistent code
             code = convert_dollar(
-                code, self.shell.dataflow_state, uuid, ref_replacer, input_tags
+                cell.persistent_code, self.df_controller, uuid, ref_replacer,
+                output_tags=self.df_controller.output_tags
             )
         except SyntaxError as e:
             # ignore this for now, catch it in do_execute
@@ -237,15 +231,13 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         except TokenError as e:
             # ignore this for now, catch it in do_execute
             pass
-
-        # print("SECOND CODE:", code)
 
         cell_id = (parent.get("metadata") or {}).get("cellId")
         if _accepts_cell_id(self.do_execute):
             reply_content = self.do_execute(
                 code,
                 uuid,
-                dfkernel_data,
+                # dfkernel_data,
                 silent,
                 store_history,
                 user_expressions,
@@ -256,7 +248,7 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
             reply_content = self.do_execute(
                 code,
                 uuid,
-                dfkernel_data,
+                # dfkernel_data,
                 silent,
                 store_history,
                 user_expressions,
@@ -294,6 +286,7 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         self.log.debug("%s", reply_msg)
 
         if not silent and reply_msg["content"]["status"] == "error" and stop_on_error:
+            # FIXME _abort_queues changes in 7.x
             self._abort_queues()
 
         return res
@@ -302,7 +295,6 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
         self,
         code,
         uuid,
-        dfkernel_data,
         silent,
         store_history=True,
         user_expressions=None,
@@ -314,11 +306,10 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
 
         self._forward_input(allow_stdin)
 
-        # print("DO EXECUTE:", uuid, file=sys.__stdout__)
         reply_content = {}
         if hasattr(shell, "run_cell_async") and hasattr(shell, "should_run_async"):
             run_cell = partial(
-                shell.run_cell_async_override, uuid=uuid, dfkernel_data=dfkernel_data
+                shell.run_cell_async_override, uuid=uuid, # dfkernel_data=dfkernel_data
             )
             should_run_async = shell.should_run_async
             with_cell_id = _accepts_cell_id(run_cell)
@@ -329,7 +320,7 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
             # use blocking run_cell and wrap it in coroutine
             async def run_cell(*args, **kwargs):
                 kwargs["uuid"] = uuid
-                kwargs["dfkernel_data"] = dfkernel_data
+                # kwargs["dfkernel_data"] = dfkernel_data
                 return shell.run_cell(*args, **kwargs)
 
             with_cell_id = _accepts_cell_id(shell.run_cell)
@@ -392,7 +383,6 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
                     res = shell.run_cell(
                         code,
                         uuid=uuid,
-                        dfkernel_data=dfkernel_data,
                         store_history=store_history,
                         silent=silent,
                         cell_id=cell_id,
@@ -401,52 +391,31 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
                     res = shell.run_cell(
                         code,
                         uuid=uuid,
-                        dfkernel_data=dfkernel_data,
                         store_history=store_history,
                         silent=silent,
                     )
         finally:
             self._restore_input()
 
-        # print("GOT RES:", res)
         if res.error_before_exec is not None:
             err = res.error_before_exec
         else:
             err = res.error_in_exec
 
-        # print("DELETED CELLS:", res, file=sys.__stdout__)
         if hasattr(res, "deleted_cells"):
             reply_content["deleted_cells"] = res.deleted_cells
+        reply_content["cell_data_dict"] = self.df_controller.cells_to_dict()
+        reply_content["df_graph_edges"] = self.df_controller.df_graph_edges
 
         if res.success:
-            # print("SETTING DEPS", res.all_upstream_deps, res.all_downstream_deps,file=sys.__stdout__)
             reply_content["status"] = "ok"
-
-            if hasattr(res, "nodes"):
-                reply_content["expected_UUID"] = self._expectedUUID
-                reply_content["executed_cell_uuid"] = uuid
-                reply_content["nodes"] = res.nodes
-                reply_content["links"] = res.links
-                reply_content["cells"] = res.cells
-                reply_content["identifier_refs"] = self._identifier_refs
-                reply_content["persistent_code"] = self._persistent_code
-
-                reply_content["upstream_deps"] = res.all_upstream_deps
-                reply_content["downstream_deps"] = res.all_downstream_deps
-                reply_content["imm_upstream_deps"] = res.imm_upstream_deps
-                reply_content["imm_downstream_deps"] = res.imm_downstream_deps
-                reply_content["update_downstreams"] = res.update_downstreams
-                reply_content["internal_nodes"] = res.internal_nodes
         else:
             reply_content["status"] = "error"
-
             reply_content.update(
                 {
                     "traceback": shell._last_traceback or [],
                     "ename": str(type(err).__name__),
                     "evalue": str(err),
-                    "persistent_code": self._persistent_code,
-                    "identifier_refs": self._identifier_refs
                 }
             )
 
@@ -486,51 +455,23 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
 
         return reply_content, res
 
-    def update_code_cells(self, dfmetadata, update_latest_executed_code=False):	
-        curr_output_tags = defaultdict(set)
-        updated_code_dict = {}
-        updated_executed_code_dict = {}
-
-        for id, tags in dfmetadata['output_tags'].items():
-            for tag in tags:
-                curr_output_tags[tag].add(id)
-    
-        def convert_code(code, uuid, refs):
-            try:
-                tag_refs = { value: key for key, value in refs['tag_refs'].items() }
-                code = convert_dollar(
-                    code, self.shell.dataflow_state, uuid, identifier_replacer, dfmetadata.get("input_tags", {}), reversion=True, tag_refs=tag_refs
-                )
-
-                code = ground_refs(
-                    code, self.shell.dataflow_state, uuid, identifier_replacer, dfmetadata.get("input_tags", {}), output_tags=dict(curr_output_tags), cell_refs=dict(code_refs), reversion=True
-                )
-
-                code = convert_identifier(code, dollar_replacer, input_tags=dfmetadata.get("input_tags", {}))
-                return code
-            except Exception as e:
-                self.log.error(f'Error in conversion for cell: {uuid}')
-                self.log.error(e)
-                return None
+    def update_code_cells(self, cell_data_dict, update_executed_code=False, use_tags=False,
+        tag_remap={}):
+        self.df_controller.update_cells(cell_data_dict)
 
 
-        for uuid, refs in dfmetadata['all_refs'].items():
-            code_refs = defaultdict(set)
-            for ref_id, ref_tags in refs['ref'].items():
-                for tag in ref_tags:
-                    code_refs[tag].add(ref_id)
-            
-            if dfmetadata['code_dict'].get(uuid):
-                code = convert_code(dfmetadata['code_dict'][uuid], uuid, refs)
-                if code is not None and code != dfmetadata['code_dict'][uuid]:
-                    updated_code_dict[uuid] = code
+        for cell_id, cell_data in cell_data_dict.items():
+            updated_cell_data = self.convert_code(cell_data['code'], cell_id, use_tags, cell_data['input_refs'],
+                tag_remap=tag_remap)
+            self.df_controller.cells[cell_id].code = updated_cell_data['code']
 
-                if update_latest_executed_code and dfmetadata['executed_code'].get(uuid):
-                    code = convert_code(dfmetadata['executed_code'][uuid],  uuid, refs)
-                    if code is not None and code != dfmetadata['executed_code'][uuid]:
-                        updated_executed_code_dict[uuid] = code
+            if update_executed_code and cell_data['executed_code']:
+                updated_executed_cell_data = self.convert_code(cell_data['executed_code'], cell_id, use_tags, cell_data['input_refs'],
+                    tag_remap=tag_remap)
+                self.df_controller.cells[cell_id].executed_code = updated_executed_cell_data['code']
 
-        return updated_code_dict, updated_executed_code_dict
+        return self.df_controller.cells_to_dict()
+
 
 # This exists only for backwards compatibility - use IPythonKernel instead
 class Kernel(IPythonKernel):

@@ -172,7 +172,6 @@ export namespace DataflowOutputArea {
     metadata?: JSONObject,
     dfData?: JSONObject,
     cellIdModelMap?: { [key: string]: IOutputAreaModel },
-    expectedUUID?: string
   ): Promise<KernelMessage.IExecuteReplyMsg | undefined> {
     // Override the default for `stop_on_error`.
     let stopOnError = true;
@@ -188,8 +187,6 @@ export namespace DataflowOutputArea {
       dfData = {} as JSONObject;
     }
 
-    dfData['expectedUUID'] = expectedUUID ?? null; 
-
     const content: KernelMessage.IExecuteRequestMsg['content'] = {
       code,
       stop_on_error: stopOnError,
@@ -204,30 +201,8 @@ export namespace DataflowOutputArea {
     output.future = future;
 
     DataflowOutputArea.cellIdModelMap = cellIdModelMap;
-    
-    return new Promise<KernelMessage.IExecuteReplyMsg>((resolve, reject) => {
-      let handled = false;
 
-      future.onReply = (reply: KernelMessage.IExecuteReplyMsg) => {
-        if (handled) return;
-
-        const replyExecutedUUID = (reply.content as any).executed_cell_uuid;
-        const replyExpectedUUID = (reply.content as any).expected_UUID;
-        const status = (reply.content as any).status;
-    
-        if (status !== 'ok' || replyExecutedUUID === replyExpectedUUID) {
-          handled = true;
-          resolve(reply);
-        }
-      };
-
-      future.dispose = () => {
-        if (!handled) {
-          handled = true;
-          reject(new Error('Canceled'));
-        }
-      };
-    });
+    return future.done;
   }
 
   /**

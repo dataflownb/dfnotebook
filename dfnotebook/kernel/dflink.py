@@ -21,21 +21,11 @@ class LinkedResult(OrderedDict):
     def get_uuid(self):
         return self.__uuid__
 
-    def __update_deps__(self, item):
-        self.__dfhist__.update_semantic_dependencies(self.__uuid__,
-                                                     self.__dfhist__.shell.uuid,
-                                                     item)
-        self.__dfhist__.remove_semantic_dependencies(self.__uuid__,
-                                                     self.__dfhist__.shell.uuid)
-
     def __getitem__(self, item):
         if isinstance(item, int):
             item = item+len(self.__libs__)
             if len(self.keys()) > item and item >= 0:
                 item = list(self.keys())[item]
-                self.__update_deps__(item)
-        elif item in self:
-            self.__update_deps__(item)
         return super().__getitem__(item)
 
     def __tuple__(self):

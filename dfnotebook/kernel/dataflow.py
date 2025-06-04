@@ -1,4 +1,4 @@
-from collections import defaultdict, namedtuple
+from collections import defaultdict, namedtuple, deque
 from collections.abc import KeysView, ItemsView, ValuesView, MutableMapping
 from .dflink import LinkedResult
 import itertools
@@ -8,7 +8,7 @@ class DataflowCellException(Exception):
         self.cid = cid
 
     def __str__(self):
-        return "Cell '{}' raised an exception".format(self.cid)
+        return "Cell(s) '{}' raised an exception".format(self.cid)
 
 class DataflowCacheError(DataflowCellException):
     def __str__(self):
@@ -19,273 +19,376 @@ class DataflowInvalidRefError(DataflowCellException):
     def __str__(self):
         return "Invalid Reference to Cell '{}'".format(self.cid)
 
-class DataflowHistoryManager(object):
-    deleted_cells = []
-    storeditems = []
-    tup_flag = False
+class InvalidCellModification(KeyError):
+    '''This error results when another cell tries to modify an Out reference'''
+    pass
 
+class CyclicalCallError(Exception):
+    """This error results when the call being made is Cyclical"""
+    def __init__(self, cell_id):
+        super().__init__(self)
+        self.cell_id = cell_id
+
+    def __str__(self):
+        return "Out[{}] results in a Cyclical call".format(self.cell_id)
+
+class DuplicateNameError(Exception):
+    def __init__(self, var_name, cell_id):
+        super().__init__(self)
+        self.var_name = var_name
+        self.cell_id = cell_id
+
+    def __str__(self):
+        return "name '{}' has already been defined in Cell '{}'".format(self.var_name,self.cell_id)
+
+class DataflowGraph(object):
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.parents = defaultdict(set) # child -> set(parent)
+        self.children = defaultdict(set) # parent -> set(child)
+
+    def remove_node(self, node):
+        self.remove_all_parents(node)
+        self.remove_all_children(node)
+
+    def add_edge(self, parent, child=None):
+        self.parents[child].add(parent) 
+        self.children[parent].add(child) 
+
+    def remove_edge(self, parent, child=None):
+        self.parents[child].discard(parent)
+        self.children[parent].discard(child)
+
+    def remove_all_children(self, parent):
+        for child in self.children[parent]:
+            self.parents[child].discard(parent)
+        del self.children[parent]
+
+    def remove_all_parents(self, child):
+        for parent in self.parents[child]:
+            self.children[parent].discard(child)
+        del self.parents[child]
+
+    def has_cycle(self):
+        in_degree = {cid: len(pids) for cid, pids in self.parents.items() if len(pids) > 0} 
+        frontier = deque([pid for pid in self.children if pid not in in_degree])
+
+        count = -len(frontier)
+        while frontier:
+            pid = frontier.popleft()
+            count += 1
+            for cid in self.children[pid]:
+                in_degree[cid] -= 1
+                if in_degree[cid] == 0:
+                    frontier.append(cid)
+
+        return count != len(in_degree)
+
+    def downstream(self, k):
+        visited = set()
+        res = set()
+        frontier = deque(self.children[k])
+        while frontier:
+            pid = frontier.popleft()
+            visited.add(pid)
+            res.add(pid)
+            for cid in self.children[pid]:
+                if cid not in visited:
+                    frontier.append(cid)
+        return res
+    descendants = downstream
+
+    def upstream(self, k):
+        visited = set()
+        res = set()
+        frontier = deque(self.parents[k])
+        while frontier:
+            cid = frontier.popleft()
+            visited.add(cid)
+            res.add(cid)
+            for pid in self.parents[cid]:
+                if pid not in visited:
+                    frontier.append(pid)
+        return res
+    ancestors = upstream
+
+    def edge_list(self):
+        return [ [parent, child]
+            for parent, children in self.children.items()
+            for child in children
+        ]
+
+class DataflowCell:
+    def __init__(self, cell_id, **kwargs):
+        self.cell_id = cell_id
+        self.code = None
+        self.persistent_code = None
+        self.input_refs = {}
+        self.output_tags = set()
+        self.name = None
+        self.executed_code = None
+        self.result = None
+        self.is_stale = True
+        self.count = -1
+        self.is_running = False
+        self.did_run = False
+        self.update(**kwargs)
+
+    def update(self, **kwargs):
+        was_changed = False
+        self.code = kwargs.get('code', None)
+        self.name = kwargs.get('name', None)
+        self.executed_code = kwargs.get('executed_code', None)
+        self.input_refs = kwargs.get('input_refs', {})
+        self.output_tags = set(kwargs.get('output_tags', []))
+        self.auto_update = kwargs.get('auto_update', False)
+        self.force_cached = kwargs.get('force_cached', False)
+
+        # only update if passed in and different...
+        new_persistent_code = kwargs.get('persistent_code', None)
+        if new_persistent_code is not None and new_persistent_code != self.persistent_code:
+            self.persistent_code = new_persistent_code
+            self.is_stale = True
+            self.result = None
+            self.output_ids = set()
+            was_changed = True
+        return was_changed
+
+    def to_dict(self):
+        return {
+            'cell_id': self.cell_id,
+            'name': self.name, # could be none...
+            'code': self.code,
+            'persistent_code': self.persistent_code, # could be none if error?
+            'executed_code': self.executed_code, # could be none if error?
+            'input_refs': {cell_id: list(refs) for cell_id, refs in self.input_refs.items()},
+            'output_tags': list(self.output_tags),
+        }
+
+    def reset_did_run(self):
+        self.did_run = False
+
+    def set_running(self):
+        self.is_running = True
+
+    # FIXME unify with add_link?
+    # question is whether we should set output_tags if there is an error
+    # does add_link only run if the cell is successful? think so...
+    def set_output_tags_from_result(self):
+        if not isinstance(self.result, LinkedResult):
+            self.output_tags = set()
+        else:
+            self.output_tags = {res_tag for res_tag in self.result if res_tag is not None}
+
+    def set_result(self, result):
+        self.result = result
+        self.set_output_tags_from_result()
+        self.is_stale = False
+        self.is_running = False
+        self.did_run = True
+
+    def set_failed(self):
+        self.result = None
+        self.is_stale = True
+        self.is_running = False
+        self.did_run = True
+
+    def should_use_cached(self):
+        return self.force_cached or not self.is_stale
+
+class DataflowController(object):
     def __init__(self, shell, **kwargs):
         self.shell = shell
         self.flags = dict(kwargs)
-        self.auto_update_flags = {}
-        self.force_cached_flags = {}
-        # self.flags['silent'] = True
         self.clear()
+
+    def clear(self):
+        self.graph = DataflowGraph()
+        self.links = DataflowLinks()
+        self.cells = {}
+        self.deleted_cells = []
+        
+    @property
+    def exec_cell_id(self):
+        return self.shell.uuid
+
+    @exec_cell_id.setter
+    def exec_cell_id(self, cell_id):
+        self.shell.uuid = cell_id
+
+    @property
+    def output_tags(self):
+        output_tags = defaultdict(set)
+        for cell_id, cell in self.cells.items():
+            for tag in cell.output_tags:
+                output_tags[tag].add(cell_id)
+        return dict(output_tags)
+
+    @property
+    def cell_names(self):
+        return {cell_id: cell.name for cell_id, cell in self.cells.items() if cell.name is not None}
+    input_tags = cell_names
+
+    @property
+    def cell_names_inv(self):
+        return {cell.name: cell_id for cell_id, cell in self.cells.items() if cell.name is not None}
+
+    @property
+    def df_graph_edges(self):
+        return self.graph.edge_list()
 
     def update_flags(self, **kwargs):
         self.flags.update(kwargs)
         # self.flags['silent'] = True
 
-    def update_code(self, key, code):        
-        # print("CALLING UPDATE CODE", key, code)
-        # if code is empty, remove the code_cache, remove links
-        if code == '' and key in self.value_cache and key in self.code_cache:
-            self.set_stale(key)
-            del self.value_cache[key]
-            del self.code_cache[key]
-            for child in self.all_downstream(key):
-                self.remove_dependencies(key, child)
-                self.remove_semantic_dependencies(key, child)
-            for parent in self.all_upstream(key):
-                self.remove_dependencies(key, parent)
-                self.remove_semantic_dependencies(key, parent)
-            self.shell.dataflow_state.reset_cell(key)
-            self.deleted_cells.append(key)
-            del self.last_calculated[key]
-        elif key not in self.code_cache or self.code_cache[key] != code:
-            # clear out the old __links__ and __rev_links__ (if exist)
-            self.shell.dataflow_state.reset_cell(key)
-            self.func_cached[key] = False
-            self.code_cache[key] = code
-            self.set_stale(key)
-            if key not in self.auto_update_flags:
-                self.auto_update_flags[key] = False;
-            if key not in self.force_cached_flags:
-                self.force_cached_flags[key] = False;
+    def update_cells(self, cells):
+        found = set()
 
-    def update_codes(self, code_dict):
-        existing_keys = set(self.code_cache.keys())
-        deleted_keys = existing_keys.difference(code_dict.keys())
-        for key, val in code_dict.items():
-            self.update_code(key, val)
-        for key in deleted_keys:
-            self.update_code(key, '')
-
-    def update_auto_update(self, flags):
-        self.auto_update_flags.update(flags)
-
-    def update_force_cached(self, flags):
-        self.force_cached_flags.update(flags)
-
-    def set_stale(self, key):
-        self.code_stale[key] = True
-        # need to make sure everything downstream also gets set to stale
-        for cid in self.all_downstream(key):
-            self.code_stale[cid] = True
-
-    def set_not_stale(self, key):
-        self.code_stale[key] = False
-
-    def is_stale(self, key):
-        return key in self.code_stale and self.code_stale[key]
-
-    def update_value(self, key, value):
-
-        self.value_cache[key] = value
-        self.last_calculated[key] = self.last_calculated_ctr
-        self.last_calculated_ctr += 1
-
-    def sorted_keys(self):
-        return (k2 for (v2, k2) in sorted((v, k) for (k, v) in self.last_calculated.items()))
-
-    def clear(self):
-        self.func_cached = {}
-        self.code_cache = {}
-        self.code_stale = {}
-        self.value_cache = {}
-        self.last_calculated = {}
-        # dependencies are a DAG
-        self.dep_parents = defaultdict(set) # child -> list(parent)
-        self.dep_children = defaultdict(set) # parent -> list(child)
-        self.dep_semantic_parents = defaultdict(dict)
-        self.last_calculated_ctr = 0
-
-    def update_dependencies(self, parent, child):
-        self.storeditems.append({'parent':parent, 'child':child})
-        self.dep_parents[child].add(parent)
-        self.dep_children[parent].add(child)
-        if parent not in self.dep_semantic_parents[child]:
-            self.dep_semantic_parents[child][parent] = set([parent])
-
-    def update_semantic_dependencies(self, parent, child,item=None):
-        if item:
-            self.dep_semantic_parents[child][parent].add(item)
-
-    def remove_dependencies(self, parent, child):
-        self.remove_dep(parent, child, self.dep_parents, self.dep_children)
-
-    def remove_semantic_dependencies(self, parent, child,item=None):
-        if parent in self.dep_semantic_parents[child]:
-            if item:
-                self.dep_semantic_parents[child][parent].discard(item)
+        # add or update cells in the notebook
+        for cid, cell in cells.items():
+            found.add(cid)
+            if cid not in self.cells:
+                self.cells[cid] = DataflowCell(**cell)
             else:
-                 self.dep_semantic_parents[child][parent].discard(parent)
+                was_changed = self.cells[cid].update(**cell)
+                if was_changed:
+                    self.remove_links(cid)
+                    self.set_downstream_stale(cid)
 
-    @staticmethod
-    def remove_dep(parent, child, parents, children):
-        if parent in parents[child]:
-            parents[child].remove(parent)
-            children[parent].remove(child)
+        # remove any cells that are no longer in notebook
+        for cid, cell in self.cells.items():
+            if cid not in found:
+                self.deleted_cells.append(cid)
+        for cid in self.deleted_cells:
+            self.graph.remove_node(cid)
+            self.links.remove_links(cid)
+            del self.cells[cid]
 
+    def cells_to_dict(self):
+        return {cid: cell.to_dict() for cid, cell in self.cells.items()}
 
-    def all_semantic_upstream(self, k):
-        return self.get_all_upstreams(k, True)
+    def execute_cell(self, cid, **flags):
+        if cid not in self.cells:
+            raise DataflowInvalidRefError(cid)
+        cell = self.cells[cid]
 
-    def all_upstream(self, k):
-        return self.get_all_upstreams(k, False)
+        if cell.should_use_cached():
+            return cell.result
 
-
-    def get_all_upstreams(self, k, semantic=False):
-        visited = set()
-        res = set(self.get_semantic_upstream(k)) if semantic else set()
-        frontier = list(self.dep_parents[k])
-        while frontier:
-            cid = frontier.pop(0)
-            visited.add(cid)
-            if semantic:
-                res.update(self.get_semantic_upstream(cid))
-            else:
-                res.add(cid)
-            for pid in self.dep_parents[cid]:
-                if pid not in visited:
-                    frontier.append(pid)
-        return list(res)
-
-
-    def all_downstream(self, k):
-        return self.get_all_downstream(k)
-
-    def get_all_downstream(self, k):
-        visited = set()
-        res = set()
-        frontier = list(self.dep_children[k])
-        while frontier:
-            cid = frontier.pop(0)
-            visited.add(cid)
-            res.add(cid)
-            for pid in self.dep_children[cid]:
-                if pid not in visited:
-                    frontier.append(pid)
-        return list(res)
-
-    def get_downstream(self, k):
-        return list(self.dep_children[k])
-
-    def get_upstream(self, k):
-        return list(self.dep_parents[k])
-
-    def get_semantic_upstream(self, k):
-        semantic_up = []
-        for key in self.dep_semantic_parents[k].keys():
-            semantic_up += [key+item for item in self.dep_semantic_parents[k][key]]
-        return semantic_up
-
-    def raw_semantic_upstream(self,k):
-        return self.dep_semantic_parents[k]
-
-    def update_downstream(self, k):
-        # this recurses via run_cell which checks for the update_downstream_deps
-        # flag at the end of its run
-        for uid in self.dep_children[k]:
-            parent_uuid = k
-            retval = self.shell.run_cell_as_execute_request(self.code_cache[uid], uid,
-                                                            **self.flags)
-            # FIXME can we just rely on run_cell?
-            self.shell.uuid = parent_uuid
-            if not retval.success:
-                # FIXME really want to just raise this error and not the bits of the
-                # stack that are internal (get_item, etc.)
-                retval.raise_error()
-
-    def execute_cell(self, k, **flags):
-        # print("EXECUTING CELL", k)
+        if self.graph.has_cycle():
+            raise CyclicalCallError(cid)
+        
         local_flags = dict(self.flags)
         local_flags.update(flags)
-        # print("LOCAL FLAGS:", local_flags)
-        for cid in self.dep_parents[k]:
-            if cid in self.dep_children[k]:
-                raise CyclicalCallError(k)
-        child_uuid = self.shell.uuid
-        retval = self.shell.run_cell_as_execute_request(self.code_cache[k], k,
-                                                   **self.flags)
-        # print('retval:', retval)
-        self.shell.uuid = child_uuid
+        cur_cell_id = self.exec_cell_id
+        retval = self.shell.run_cell_as_execute_request(cell.persistent_code, cid, **local_flags)
+        self.exec_cell_id = cur_cell_id
+
         if not retval.success:
-            raise DataflowCellException(k)
-        # FIXME can we just rely on run_cell?
+            raise DataflowCellException(cid)
         return retval.result
 
-    def run_auto_updates(self, k):
-        for cid in self.get_downstream(k):
-            if self.auto_update_flags[cid]:
-                upstreams = self.get_all_upstreams(cid)
-                if all(not self.is_stale(upcid) or self.auto_update_flags[upcid]
-                       for upcid in upstreams):
-                    retval = self.execute_cell(cid)
+    def set_running(self, cid):
+        self.cells[cid].set_running()
 
-    def __getitem__(self, k):
-        res = self.get_item(k)
+    def reset_did_run(self):
+        for cell in self.cells.values():
+            cell.reset_did_run()
+
+    def downstream_update(self, pid):
+        errs = []
+        visited = set()
+        for cid in self.graph.downstream(pid):
+            if cid in visited:
+                continue
+            visited.add(cid)
+            cell = self.cells[cid]
+
+            if cell.is_running:
+                continue
+
+            wait_to_run = False
+            for pcid in self.graph.upstream(cid):
+                if self.cells[pcid].is_running:
+                    wait_to_run = True
+            if wait_to_run:
+                continue
+            if cell.did_run:
+                continue
+
+            if cell.auto_update:
+                try:
+                    retval = self.execute_cell(cid)
+                except DataflowCellException as e:
+                    errs.append(e.cid)
+        if len(errs) > 0:
+            raise DataflowCellExecption(errs)
+        
+    def set_downstream_stale(self, pid):
+        for cid in self.graph.downstream(pid):
+            self.cells[cid].is_stale = True
+
+    def add_link(self, tag, cell_id, make_current=True):
+        self.links.add_link(tag, cell_id, make_current)
+
+    def add_links(self, output_tags):
+        self.links.add_links(output_tags)
+
+    def remove_links(self, cell_id):
+        self.links.remove_links(cell_id)
+
+    def complete(self, text, input_tags={}):
+        self.links.complete(text, input_tags)
+
+    def has_external_link(self, k, cur_id):
+        return self.links.has_external_link(k, cur_id)
+
+    def get_external_link(self, k, cur_id):
+        return self.links.get_external_link(k, cur_id)
+
+    def pop_deleted_cells(self):
+        deleted_cells = self.deleted_cells
+        self.deleted_cells = []
+        return deleted_cells
+    
+    def set_result(self, cid, result):
+        if cid != self.exec_cell_id:
+            raise InvalidCellModification("Cell", cid, "can only be modified by it's own cell")
+        self.cells[cid].set_result(result)
+
+    def set_failed(self, cid):
+        self.cells[cid].set_failed()
+        self.graph.remove_all_children(cid)
+
+    def __setitem__(self, cid, value):
+        if cid != self.exec_cell_id:
+            raise InvalidCellModification("Out[" + key + "] can only be modified by it's own cell")
+        self.cells[cid].set_result(value)
+
+    def __getitem__(self, cid):
+        # add edge between requested cell and the executing cell
+        self.graph.add_edge(cid, self.exec_cell_id)
+
+        res = self.execute_cell(cid)
         if isinstance(res, LinkedResult):
             if res.__tuple__() is None:
                 return res
             return res.__tuple__()
         return res
 
-    def stale_check(self, k):
-        if k not in self.code_stale:
-            raise DataflowInvalidRefError(k)
-
-    def get_item(self, k):
-        self.stale_check(k)
-        self.update_dependencies(k, self.shell.uuid)
-        # if k in self.value_cache:
-        #     print(k, "in cache", self.value_cache[k])
-
-        # force recompute
-        if self.force_cached_flags[k]:
-            if k not in self.value_cache:
-                raise DataflowCacheError(k)
-            # print("returning cache", k)
-            return self.value_cache[k]
-
-        # check if we need to recompute
-        if not self.is_stale(k):
-            # print("returning not stale cache", k)
-            return self.value_cache[k]
-        # print('executing cell', k)
-        return self.execute_cell(k)
-
-    def __setitem__(self, key, value):
-        class InvalidCellModification(KeyError):
-            '''This error results when another cell tries to modify an Out reference'''
-        if key == self.shell.uuid:
-            self.update_value(key, value)
-        else:
-            raise InvalidCellModification("Out[" + key + "] can only be modified by it's own cell")
-
-    def get(self, k, default=None):
+    def get(self, cid, default=None):
         try:
             return self.__getitem__(k)
         except KeyError:
             return default
 
     def __len__(self):
-        return len(self.code_cache)
+        return len(self.cells)
 
     def __iter__(self):
-        return self.code_cache.__iter__()
-
-
+        return iter(self.cells)
 
 class DataflowFunction(object):
     def __init__(self, df_f_manager, cell_uuid):
@@ -359,119 +462,55 @@ class DataflowFunctionManager(object):
             return next(iter(res.values()))
         return retval
 
-class CyclicalCallError(Exception):
-    """This error results when the call being made is Cyclical"""
-    def __init__(self, cell_id):
-        super().__init__(self)
-        self.cell_id = cell_id
-
-    def __str__(self):
-        return "Out[{}] results in a Cyclical call".format(self.cell_id)
-
-class DuplicateNameError(Exception):
-    def __init__(self, var_name, cell_id):
-        super().__init__(self)
-        self.var_name = var_name
-        self.cell_id = cell_id
-
-    def __str__(self):
-        return "name '{}' has already been defined in Cell '{}'".format(self.var_name,self.cell_id)
-
-class DataflowState:
-    def __init__(self, history):
-        self.history = history
-        self.links = defaultdict(list)
-        self.all_links = defaultdict(set) # most recent is last
+class DataflowLinks:
+    def __init__(self):
+        self.cur_links = defaultdict(list) # most recent is last
+        self.links = defaultdict(set)
         self.rev_links = defaultdict(set)
-        self.cur_cell_id = None
 
-    def set_cur_cell_id(self, cell_id):
-        self.cur_cell_id = cell_id
-
-    def has_link(self, k):
-        return self.has_external_link(k, self.cur_cell_id)
-        # return k in self.links
-
-    def get_parent(self, k):
-        if not self.has_link(k):
-            raise DataflowCellException(f"No cell defines '{k}'")
-        # return self.links[k][-1]
-        return self.get_external_link(k, self.cur_cell_id)
-
-    get_cell = get_parent
-
-    def get_link(self, k):
-        # We should not get here unless the reference is not
-        # found during tokenization. This can happen is the function
-        # references the globals directly
-        # (e.g. pandas query with @var references)
-        # If this happens, we need to add it to the beginning of the cell
-        # to make sure the reference is explicitly linked to the correct
-        # cell_id
-        cell_id = self.get_parent(k)
-        # rev_links = self.rev_links[cell_id]
-
-        # FIXME want to update the code/something in self.cur_cell_id
-        # so that it dumps in a reference at the top of the cell as
-        # k = k$cell_id
-        # could have preference for setting as k = k$^cell_id
-        #
-        # self.history.add_deps(self.cur_cell_id, cell_id, k)
-        return self.history.get_item(cell_id)[k]
+    def add_link(self, tag, cell_id, make_current=True):
+        self.links[tag].add(cell_id)
+        self.rev_links[cell_id].add(tag)
+        if make_current:
+            self.cur_links[tag].append(cell_id)
 
     def add_links(self, output_tags):
-        """Used for adding links of pre-existing links currently only used for cold starts"""
-
-        # FIXME really need to store this information in the notebook metadata
-        # in order to keep track of this...
         new_tags = set()
-        for (cell_id, tag_list) in output_tags.items():
-            for tag in tag_list:
-                # print("OUTER ADD_LINKS:", cell_id, tag)
+        for (tag, cell_ids) in output_tags.items():
+            for cell_id in cell_ids:
                 self.add_link(tag, cell_id, make_current=False)
                 new_tags.add(tag)
         for tag in new_tags:
-            if len(self.all_links[tag]) == 1 and not self.has_current_link(tag):
+            if len(self.links[tag]) == 1 and not self.has_current_link(tag):
                 # can make current because unambiguous
-                cell_id = next(iter(self.all_links[tag]))
-                # print('ADDING TAG (ADD_LINKS):', cell_id, tag)
-                self.links[tag].append(cell_id)
+                cell_id = next(iter(self.links[tag]))
+                self.cur_links[tag].append(cell_id)
 
-    def add_link(self, tag, cell_id, make_current=True):
-        # print("OUTER ADD_LINK:", cell_id, tag)
-        if isinstance(tag, str):
-            self.all_links[tag].add(cell_id)
-            self.rev_links[cell_id].add(tag)
-            if make_current:
-                # print('ADDING TAG (ADD_LINK):', cell_id, tag)
-                self.links[tag].append(cell_id)
-
-    def reset_cell(self, cell_id):
-        # print(f"{cell_id} LINKS: {self.links} REV LINKS: {self.rev_links} ALL_LINKS: {self.all_links}")
+    def remove_links(self, cell_id):
         if cell_id in self.rev_links:
             for name in self.rev_links[cell_id]:
-                if cell_id in self.links[name]:
-                    self.links[name].remove(cell_id)
-                self.all_links[name].discard(cell_id)
+                if cell_id in self.cur_links[name]:
+                    self.cur_links[name].remove(cell_id)
+                self.links[name].discard(cell_id)
             del self.rev_links[cell_id]
 
     def has_current_link(self, k):
-        # print("HAS CURRENT LINK:", k, self.links[k])
-        return k in self.links and len(self.links[k]) > 0
+        # print("HAS CURRENT LINK:", k, self.cur_links[k])
+        return k in self.cur_links and len(self.cur_links[k]) > 0
 
     def get_current_link(self, k):
         if not self.has_current_link(k):
             raise DataflowCellException(f"No cell defines '{k}'")
-        return self.links[k][-1]
+        return self.cur_links[k][-1]
 
     def has_external_link(self, k, cur_id):
         return self.has_current_link(k) and self.get_current_link(k) != cur_id
-        # return (k in self.links) and (self.links[k][-1] != cur_id or len(self.links[k]) > 1)
+        # return (k in self.cur_links) and (self.cur_links[k][-1] != cur_id or len(self.cur_links[k]) > 1)
 
     def get_external_link(self, k, cur_id):
         if not self.has_external_link(k, cur_id):
             raise DataflowCellException(f"No external link to '{k}'")
-        for cell_id in reversed(self.links[k]):
+        for cell_id in reversed(self.cur_links[k]):
             if cell_id != cur_id:
                 return cell_id
 
@@ -481,9 +520,7 @@ class DataflowState:
         cell_start = None
         if '$' in text:
             id_start, cell_start = text.split('$',maxsplit=1)
-        import sys
-        # print(f"COMPLETER INTERNAL: '{id_start}' '{cell_start}'", file=sys.__stdout__)
-        for link, cell_ids in self.all_links.items():
+        for link, cell_ids in self.links.items():
             if link.startswith(id_start):
                 if cell_start:
                     results.extend(link + '$' + input_tag
@@ -500,11 +537,11 @@ class DataflowState:
         return results
 
     def clear(self):
+        self.cur_links.clear()
         self.links.clear()
-        self.all_links.clear()
         self.rev_links.clear()
 
 class DataflowNamespace(dict):
     def clear(self):
         super().clear()
-        self.__df_state__.clear()
+        self.__df_controller__.clear()

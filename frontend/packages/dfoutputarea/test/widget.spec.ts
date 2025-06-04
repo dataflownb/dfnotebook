@@ -1,12 +1,11 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { SessionContext } from '@jupyterlab/apputils';
+import { ISessionContext, SessionContext } from '@jupyterlab/apputils';
 import { createSessionContext } from '@jupyterlab/apputils/lib/testutils';
 import {
   IOutputAreaModel,
   OutputAreaModel,
-  SimplifiedOutputArea
 } from '@jupyterlab/outputarea';
 import {
   DataflowOutputArea as OutputArea,
@@ -21,6 +20,11 @@ import { Message } from '@lumino/messaging';
 import { Widget } from '@lumino/widgets';
 import { simulate } from 'simulate-event';
 import { IExecuteReplyMsg, IShellMessage, ShellMessageType } from '@jupyterlab/services/lib/kernel/messages';
+
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect, jest, test } from '@jest/globals';
+import { IDataflowCellData } from '@dfnotebook/dfcells';
+import { truncateCellId } from '@dfnotebook/dfutils';
+import { JSONObject, UUID } from '@lumino/coreutils';
 
 /**
  * The default rendermime instance to use for testing.
@@ -44,6 +48,73 @@ class LogOutputArea extends OutputArea {
     super.onModelChanged(sender, args);
     this.methods.push('onModelChanged');
   }
+}
+
+function createCodeCellData(code: string, cellId: string): IDataflowCellData {
+  return {
+    code,
+    cell_id: cellId,
+    input_refs: {},
+    output_tags: [],
+    auto_update: false,
+    force_cached: false
+  };
+}
+
+interface IOutputAreaFutureOptions {
+  cellId?: string;
+  model?: IOutputAreaModel;
+  metadata?: JSONObject;
+  cellDataDict?: { [cellId: string]: IDataflowCellData };
+  cellModelMap?: { [cellId: string]: IOutputAreaModel };
+  }
+
+function createOutputAreaFuture(code: string, sessionContext: ISessionContext, options: IOutputAreaFutureOptions = {}): {future: Promise<IExecuteReplyMsg>, widget: LogOutputArea} {
+  let { cellId, model, metadata, cellDataDict, cellModelMap } = options;
+  if (cellId === undefined)
+    cellId = truncateCellId(UUID.uuid4());
+  if (model === undefined)
+    model = new OutputAreaModel({ trusted: true });
+  if (metadata === undefined) {
+    metadata = {};
+  }
+  metadata.cellId = cellId;
+  if (cellDataDict === undefined) {
+    cellDataDict = {};
+  }
+  cellDataDict[cellId] = createCodeCellData(code, cellId);
+  if (cellModelMap === undefined) {
+    cellModelMap = {};
+  }
+  cellModelMap[cellId] = model;
+
+  const dfData = {
+    uuid: cellId,
+    cell_data_dict: cellDataDict
+  } as JSONObject;
+  const widget = new LogOutputArea({ rendermime, model }, cellId);
+  const future = OutputArea.execute(code, widget, sessionContext, metadata, dfData, cellModelMap) as Promise<IExecuteReplyMsg>;
+  return {future, widget};
+}
+
+function createMultipleOutputAreaFutures(codes: string[], sessionContext: ISessionContext, metadata?: JSONObject) {
+  const futures: Promise<IExecuteReplyMsg>[] = [];
+  const widgets: OutputArea[] = [];
+  if (metadata === undefined) {
+    metadata = {};
+  }
+
+  // these will be mutated in place
+  const cellDataDict = {};
+  const cellModelMap = {};
+  for (const code of codes) {
+    const {future, widget} = createOutputAreaFuture(code, sessionContext, {metadata, cellDataDict, cellModelMap});
+    if (future !== undefined)
+      futures.push(future);
+    if (widget !== undefined)
+      widgets.push(widget);
+  }
+  return {futures, widgets};
 }
 
 describe('outputarea/widget', () => {
@@ -330,8 +401,6 @@ describe('outputarea/widget', () => {
         
           await (sessionContext as SessionContext).initialize();
           await sessionContext.session?.kernel?.info;
-          await sessionContext.session?.id;
-          await sessionContext.startKernel();
       });
 
       afterEach(async () => {
@@ -340,48 +409,28 @@ describe('outputarea/widget', () => {
       });
 
       it('should execute code on a kernel and send outputs to the model', async () => {
-        let uuid = String(widget.cellId);
-        let metadata: any = {};
-        let code_dict: any = {};
-        let mockmap: any = {};
-        let mockdata: any = {};
-        metadata['cellId'] = uuid;
-        code_dict[uuid] = CODE;
-        mockdata['uuid'] = uuid;
-        mockdata['code_dict'] = code_dict;
-        mockmap[uuid] = widget;
-        const reply = await OutputArea.execute(CODE, widget, sessionContext,metadata,mockdata,mockmap,uuid);
+        const {future, widget} = createOutputAreaFuture(CODE, sessionContext);
+        const reply = await future;
         expect(reply!.content.execution_count).toBeTruthy();
         expect(reply!.content.status).toBe('ok');
         
-        expect(model.length).toBe(0);
+        expect(widget.model.length).toBe(1);
+        widget.dispose();
       });
 
       it('should clear existing outputs', async () => {
-        widget.model.fromJSON(DEFAULT_OUTPUTS);
-        let uuid = String(widget.cellId);
-        let metadata: any = {};
-        let code_dict: any = {};
-        let mockmap: any = {};
-        let mockdata: any = {};//'uuid':uuid,'code_dict':{uuid:code}};
-        metadata['cellId'] = uuid;
-        code_dict[uuid] = CODE;
-        mockdata['uuid'] = uuid;
-        mockdata['code_dict'] = code_dict;
-        mockmap[uuid] = widget;
-        const reply = await OutputArea.execute(CODE, widget, sessionContext,metadata,mockdata,mockmap,uuid);
+        // create a model with existing outputs
+        const model = new OutputAreaModel({ trusted: true });
+        model.fromJSON(DEFAULT_OUTPUTS);
+        
+        const {future, widget} = createOutputAreaFuture(CODE, sessionContext, {model});
+        const reply = await future;
         expect(reply!.content.execution_count).toBeTruthy();
-        expect(model.length).toBe(0);
+        expect(widget.model.length).toBe(1);
+        widget.dispose();
       });
 
       it('should handle routing of display messages', async () => {
-        const model0 = new OutputAreaModel({ trusted: true });
-        const widget0 = new LogOutputArea({ rendermime, model: model0 }, 'aaaaaaa1');
-        const model1 = new OutputAreaModel({ trusted: true });
-        const widget1 = new LogOutputArea({ rendermime, model: model1 }, 'bbbbbbb1');
-        const model2 = new OutputAreaModel({ trusted: true });
-        const widget2 = new LogOutputArea({ rendermime, model: model2 }, 'ccccccc1');
-
         const code0 = [
           'ip = get_ipython()',
           'from IPython.display import display',
@@ -395,151 +444,66 @@ describe('outputarea/widget', () => {
           '  session.send(iopub, msg_type, content, parent=ip.parent_header)',
           'ip,display_with_id'
         ].join('\n');
-        const code1 = 'j = 3'; 
-        
+        const code1 = 'j = 3';         
         const code2 = 'a,b,c = 4,j,4';
 
-        let ipySessionContext: SessionContext;
-        ipySessionContext = await createSessionContext(
-          {'kernelPreference':
-          {'name':'dfpython3','autoStartDefault':true,'shouldStart':true}});
-        await ipySessionContext.initialize();
-        let uuid = String(widget0.cellId);
-        let metadata: any = {};
-        let code_dict: any = {};
-        let mockmap: any = {};
-        let mockdata: any = {};
-        metadata['cellId'] = uuid;
-        code_dict[uuid] = code0;
-        mockdata['uuid'] = uuid;
-        mockdata['code_dict'] = code_dict;
-        mockmap[uuid] = widget0;
+        const {futures, widgets} = createMultipleOutputAreaFutures([code0, code1, code2], sessionContext);
 
-        const promise0 = OutputArea.execute(code0, widget0, ipySessionContext,{},mockdata,mockmap,uuid);
-        uuid = String(widget1.cellId);
-        mockdata['uuid'] = uuid;
-        code_dict[uuid] = code1;
-        mockdata['code_dict'] = code_dict;
-        metadata['cellId'] = uuid;
-        mockmap[uuid] = widget1;
-        const promise1 = OutputArea.execute(code1, widget1, ipySessionContext,{},mockdata,mockmap,uuid);
-        await Promise.all([promise0, promise1]);
-        expect(model1.length).toBe(1);
-        const outputs2 = model1.toJSON();
-        expect(outputs2[0].data).toEqual({"text/plain": '3'});
-        expect(outputs2[0]["metadata"]).toEqual({"output_tag":"j"});
-        uuid = String(widget2.cellId);
-        mockdata['uuid'] = uuid;
-        code_dict[uuid] = code2;
-        mockdata['code_dict'] = code_dict;
-        metadata['cellId'] = uuid;
-        mockmap[uuid] = widget2;
-        await OutputArea.execute(code2, widget2, ipySessionContext,metadata,mockdata,mockmap,uuid);
-        
-        expect(model1.length).toBe(1);
-        expect(model2.length).toBe(3);
-        const outputs = model2.toJSON();
-        expect(outputs[0].data).toEqual({ 'text/plain': '4' });
-        expect(outputs[0]["metadata"]).toEqual({"output_tag":"a"});
-        expect(outputs[1].data).toEqual({ 'text/plain': '3' });
-        expect(outputs[1]["metadata"]).toEqual({"output_tag":"b"});
-        expect(outputs[2].data).toEqual({ 'text/plain': '4' });
-        expect(outputs[2]["metadata"]).toEqual({"output_tag":"c"});
-        await ipySessionContext.shutdown();
+        await Promise.all(futures.slice(2));
+        expect(widgets[1].model.length).toBe(1);
+        const outputs1 = widgets[1].model.toJSON();
+        expect(outputs1[0].data).toEqual({"text/plain": '3'});
+        expect(outputs1[0]["metadata"]).toEqual({"output_tag":"j"});
+
+        await futures[2];
+        expect(widgets[1].model.length).toBe(1);
+        expect(widgets[2].model.length).toBe(3);
+        const outputs2 = widgets[2].model.toJSON();
+        expect(outputs2[0].data).toEqual({ 'text/plain': '4' });
+        expect(outputs2[0]["metadata"]).toEqual({"output_tag":"a"});
+        expect(outputs2[1].data).toEqual({ 'text/plain': '3' });
+        expect(outputs2[1]["metadata"]).toEqual({"output_tag":"b"});
+        expect(outputs2[2].data).toEqual({ 'text/plain': '4' });
+        expect(outputs2[2]["metadata"]).toEqual({"output_tag":"c"});
+
+        for (const widget of widgets) {
+          widget.dispose();
+        }
       });
 
       it('should stop on an error', async () => {
-        let ipySessionContext: SessionContext;
-        ipySessionContext = await createSessionContext(
-          {'kernelPreference':
-          {'name':'dfpython3','autoStartDefault':true,'shouldStart':true}});
-        await ipySessionContext.initialize();
-        const widget1 = new LogOutputArea({ rendermime, model }, 'aaaaaaa1');
-        let uuid = widget1.cellId;
-        let metadata: any = {};
-        let code_dict: any = {};
-        let mockmap: any = {};
-        let mockdata: any = {};
-        metadata['cellId'] = uuid;
-        code_dict[uuid] = 'a++1';
-        mockdata['uuid'] = uuid;
-        mockdata['code_dict'] = code_dict;
-        mockmap[uuid] = widget;
-        const future1 = OutputArea.execute('a++1', widget, ipySessionContext,metadata,mockdata,mockmap,uuid);
-        uuid = String(widget1.cellId);
-        mockdata['uuid'] = uuid;
-        code_dict[uuid] = 'a=1';
-        mockdata['code_dict'] = code_dict;
-        metadata['cellId'] = uuid;
-        const future2 = OutputArea.execute('a=1', widget1, ipySessionContext,metadata,mockdata,mockmap,uuid);
-        const reply = await future1;
-        const reply2 = await future2;
+        const {future: future1, widget: widget1} = createOutputAreaFuture('a := 1', sessionContext)
+        const {future: future2, widget: widget2} = createOutputAreaFuture('a = 1', sessionContext);
+        const [reply, reply2] = await Promise.all([future1, future2]);
         expect(reply!.content.status).toBe('error');
         expect(reply2!.content.status).toBe('aborted');
-        expect(model.length).toBe(0);
+        expect(widget2.model.length).toBe(0);
         widget1.dispose();
-        await ipySessionContext.shutdown();
+        widget2.dispose();
       });
 
       it('should allow an error given "raises-exception" metadata tag', async () => {
-        let ipySessionContext: SessionContext;
-        ipySessionContext = await createSessionContext(
-          {'kernelPreference':
-          {'name':'dfpython3','autoStartDefault':true,'shouldStart':true}});
-        await ipySessionContext.initialize();
-        const widget1 = new LogOutputArea({ rendermime, model }, 'aaaaaaa1');
-        let uuid = widget1.cellId;
-        let metadata: any = {};
-        let code_dict: any = {};
-        let mockmap: any = {};
-        let mockdata: any = {};
-        metadata['cellId'] = uuid;
-        code_dict[uuid] = 'a++1';
-        mockdata['uuid'] = uuid;
-        mockdata['code_dict'] = code_dict;
-        mockmap[uuid] = widget1;
-        const future1 = OutputArea.execute(
-          'a++1',
-          widget,
-          ipySessionContext,
-          metadata,
-          mockdata,
-          mockmap,
-          uuid
-        );
-        uuid = String(widget1.cellId);
-        mockdata['uuid'] = uuid;
-        code_dict[uuid] = 'a=1';
-        mockdata['code_dict'] = code_dict;
-        metadata['cellId'] = uuid;
-        const future2 = OutputArea.execute('a=1', widget1, ipySessionContext,metadata,mockdata,mockmap,uuid);
-        const reply = await future1;
-        const reply2 = await future2;
+        const {future: future1, widget: widget1} = createOutputAreaFuture('a := 1', sessionContext, {metadata: {'tags': ['raises-exception']}});
+        const {future: future2, widget: widget2} = createOutputAreaFuture('a = 1', sessionContext);
+        const [reply, reply2] = await Promise.all([future1, future2]);
         expect(reply!.content.status).toBe('error');
-        expect(reply2!.content.status).toBe('aborted');
+        expect(reply2!.content.status).toBe('ok');
         widget1.dispose();
-        await ipySessionContext.shutdown();
+        widget2.dispose();
       });
 
       it('should continuously render delayed outputs', async () => {
-        const model0 = new OutputAreaModel({ trusted: true });
-        const widget0 = new SimplifiedOutputArea({
-          model: model0,
-          rendermime: rendermime
-        });
-        let ipySessionContext: SessionContext;
-        ipySessionContext = await createSessionContext({
-          kernelPreference: { name: 'python3' }
-        });
-        await ipySessionContext.initialize();
         const code = [
           'import time',
           'for i in range(3):',
           '    print(f"Hello Jupyter! {i}")',
           '    time.sleep(1)'
         ].join('\n');
-        await SimplifiedOutputArea.execute(code, widget0, ipySessionContext);
-        expect(model0.toJSON()[0].text).toBe(widget0.node.textContent);
+        const {future, widget} = createOutputAreaFuture(code, sessionContext);
+        await future;
+        const output = widget.model.toJSON();
+        expect(output[0].text).toBe(
+          'Hello Jupyter! 0\nHello Jupyter! 1\nHello Jupyter! 2\n');
       });
      });
 

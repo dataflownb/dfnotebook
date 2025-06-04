@@ -1,6 +1,8 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
+import { getCellModel } from './model';
+
 import {
   CodeCell,
   MarkdownCell,
@@ -13,7 +15,9 @@ import {
   DataflowCodeCell,
   DataflowMarkdownCell,
   DataflowRawCell,
+  DataflowCodeCellModel,
 } from '@dfnotebook/dfcells';
+import { DataflowNotebookModel } from './model';
 
 /**
  * The namespace for the `StaticNotebook` class statics.
@@ -37,6 +41,7 @@ export namespace DataflowStaticNotebook {
       if (!options.contentFactory) {
         options.contentFactory = this;
       }
+      options.model = getCellModel(options.model.sharedModel) as DataflowCodeCellModel;
       return new DataflowCodeCell(options).initializeState();
     }
 
@@ -72,7 +77,41 @@ export namespace DataflowStaticNotebook {
   }
 }
 
-export class DataflowNotebook extends Notebook { }
+export class DataflowNotebook extends Notebook { 
+  constructor(options: Notebook.IOptions) {
+    super(options);
+  }
+
+  public initializeState() {
+    this.model?.cells.changed.connect((sender, args) => {
+      if (args.type === 'add')
+        this.updateTagState([args.newIndex]);
+    });
+    this.updateTagState();
+  }
+
+  public updateTagState(indices?: number[]) {
+    const tagsEnabled = (this.model as DataflowNotebookModel).enableTags;
+    if (indices === undefined)
+      indices = Array.from(this.widgets.keys());
+    for (const index of indices) {
+      requestAnimationFrame(() => {
+        const anyCell = this.widgets[index];
+        if (anyCell.model.type == 'code') {
+          const cell = anyCell as DataflowCodeCell;
+          cell.tagEnabled = tagsEnabled;
+          cell.setPrompt();
+        }
+      });
+    }
+  }
+      
+  public toggleTagEnabled() {
+    const model = this.model as DataflowNotebookModel;
+    model.enableTags = !model.enableTags;
+    this.updateTagState()    
+  }
+}
 
 export namespace DataflowNotebook {
   /**
