@@ -7,8 +7,9 @@ import {
   CodeMirrorMimeTypeService,
   EditorLanguageRegistry
 } from '@jupyterlab/codemirror';
-import { Cell as CellType, CodeCellModel } from '@jupyterlab/cells';
+import { Cell as CellType } from '@jupyterlab/cells';
 import { DataflowCell as Cell } from './widget';
+import { DataflowCodeCellModel as CodeCellModel } from './model';
 
 
 /**
