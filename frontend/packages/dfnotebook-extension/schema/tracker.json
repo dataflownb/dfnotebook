@@ -31,6 +31,33 @@
         "name": "name",
         "command": "toolbar-button:set-cell-name",
         "rank": 1
+      },
+      {
+        "name": "reactive",
+        "command": "toolbar-button:reactive-cell",
+        "rank": 2
+      }
+    ],
+    "Notebook": [
+      {
+          "name": "toggle-cell-names",
+          "command": "dfnotebook:toggle-cell-names",
+          "rank": 510
+      },
+      {
+          "name": "toggle-reactive",
+          "command": "dfnotebook:toggle-reactive",
+          "rank": 511
+      },
+      {
+          "name": "dep-viewer",
+          "command": "dfnotebook:dep-viewer",
+          "rank": 512
+      },
+      {
+          "name": "minimap",
+          "command": "dfnotebook:minimap",
+          "rank": 513
       }
     ]
   },

@@ -23,11 +23,10 @@ import {
   SessionContextDialogs,
   showDialog,
   MainAreaWidget,
-  ToolbarButton,
   Toolbar
 } from '@jupyterlab/apputils';
 import { Graph, Manager as GraphManager, ViewerWidget } from '@dfnotebook/dfgraph';
-import { Cell, CodeCell, CodeCellModel, ICellModel, ICodeCellModel, MarkdownCell } from '@jupyterlab/cells';
+import { Cell, CodeCell, ICellModel, MarkdownCell } from '@jupyterlab/cells';
 import { IEditorServices } from '@jupyterlab/codeeditor';
 import { IEditorExtensionRegistry } from '@jupyterlab/codemirror';
 import { ToolbarItems as DocToolbarItems } from '@jupyterlab/docmanager-extension';
@@ -35,7 +34,7 @@ import { DocumentRegistry, IDocumentWidget } from '@jupyterlab/docregistry';
 import { IDefaultFileBrowser } from '@jupyterlab/filebrowser';
 import { ILauncher } from '@jupyterlab/launcher';
 import { IMainMenu } from '@jupyterlab/mainmenu';
-import { truncateCellId } from '@dfnotebook/dfutils';
+import { cellIdIntToStr, truncateCellId } from '@dfnotebook/dfutils';
 import * as nbformat from '@jupyterlab/nbformat';
 import {
   ExecutionIndicator,
@@ -53,6 +52,7 @@ import {
   setCellExecutor
 } from '@jupyterlab/notebook';
 import { IObservableList } from '@jupyterlab/observables';
+import { KernelMessage } from '@jupyterlab/services';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import { ITranslator, nullTranslator } from '@jupyterlab/translation';
 import {
@@ -85,27 +85,56 @@ import { DisposableSet } from '@lumino/disposable';
 import { Panel } from '@lumino/widgets';
 
 import {
+  DataflowNotebook,
   DataflowNotebookModel,
   DataflowNotebookModelFactory,
   DataflowNotebookPanel,
   DataflowNotebookWidgetFactory,
   IDataflowNotebookWidgetFactory,
-  getCellsMetadata,
-  getAllTags,
   dfCommGetData
 } from '@dfnotebook/dfnotebook';
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { IChangedArgs, PageConfig } from '@jupyterlab/coreutils';
-import { DataflowInputArea } from '@dfnotebook/dfcells';
+import { IDataflowCodeCellModel } from '@dfnotebook/dfcells';
 
 import { cellExecutor } from './cellexecutor';
 import { CellBarExtension } from '@jupyterlab/cell-toolbar';
 import { Widget } from '@lumino/widgets';
 import tagSvgstr from '../style/tag.svg';
+import tagOffSvgstr from '../style/tag-off.svg';
+import reactiveSvgstr from '../style/reactive.svg';
+import nonReactiveSvgstr from '../style/non-reactive.svg';
+import depViewerSvgstr from '../style/dep-viewer.svg';
+import minimapSvgstr from '../style/minimap.svg';
 
 export const tagIcon = new LabIcon({
   name: 'tag',
   svgstr: tagSvgstr
+});
+
+export const tagOffIcon = new LabIcon({
+  name: 'tag-off',
+  svgstr: tagOffSvgstr
+})
+
+export const reactiveIcon = new LabIcon({
+  name: 'reactive',
+  svgstr: reactiveSvgstr
+});
+
+export const nonReactiveIcon = new LabIcon({
+  name: 'non-reactive',
+  svgstr: nonReactiveSvgstr
+});
+
+export const depViewerIcon = new LabIcon({
+  name: 'dep-viewer',
+  svgstr: depViewerSvgstr
+});
+
+export const minimapIcon = new LabIcon({
+  name: 'df-minimap',
+  svgstr: minimapSvgstr
 });
 
 /**
@@ -300,6 +329,16 @@ namespace CommandIDs {
   export const modifyCellName = 'notebook:modify-cell-name';
 
   export const setCellName = 'toolbar-button:set-cell-name';
+
+  export const reactiveCodeCell = 'toolbar-button:reactive-cell';
+
+  export const toggleCellNamesCmd = 'dfnotebook:toggle-cell-names';
+
+  export const toggleReactiveCmd = 'dfnotebook:toggle-reactive';
+
+  export const depViewerCmd = 'dfnotebook:dep-viewer';
+
+  export const minimapCmd = 'dfnotebook:minimap';
 }
 
 /**
@@ -385,7 +424,6 @@ const widgetFactoryPlugin: JupyterFrontEndPlugin<DataflowNotebookWidgetFactory.I
     autoStart: true
   };
 
-// FIXME Add back when dfgraph is updated
 // /**
 //  * Initialization for the Dfnb GraphManager for working with multiple graphs.
 //  */
@@ -477,172 +515,152 @@ const GraphManagerPlugin: JupyterFrontEndPlugin<void> = {
 
 }
 
-// /**
-//  * Initialization data for the Dfnb Depviewer extension.
-//  */
+/**
+ * Initialization data for the Dfnb Depviewer extension.
+ */
 const DepViewer: JupyterFrontEndPlugin<void> = {
   id: 'dfnb-depview',
   autoStart: true,
   requires: [ICommandPalette, INotebookTracker],
-  activate: (app: JupyterFrontEnd, palette: ICommandPalette, nbTrackers: INotebookTracker) => {
-
-  // Create a blank content widget inside of a MainAreaWidget
-      const newWidget = () => {
-          const content = new ViewerWidget();
-          //GraphManager uses flags from the ViewerWidget
-          GraphManager.depWidget = content;
-          const widget = new MainAreaWidget({ content });
-          widget.id = 'dfnb-depview';
-          widget.title.label = 'Dependency Viewer';
-          widget.title.closable = true;
-          // Add a div to the panel
-          let panel = document.createElement('div');
-          panel.setAttribute('id','depview');
-          content.node.appendChild(panel);
-          return widget;
+  activate: (
+    app: JupyterFrontEnd,
+    palette: ICommandPalette,
+    nbTrackers: INotebookTracker
+  ) => {
+    // Create a blank content widget inside of a MainAreaWidget
+    const newWidget = () => {
+      const content = new ViewerWidget();
+      //GraphManager uses flags from the ViewerWidget
+      GraphManager.depWidget = content;
+      const widget = new MainAreaWidget({ content });
+      widget.id = 'dfnb-depview';
+      widget.title.label = 'Dependency Viewer';
+      widget.title.closable = true;
+      // Add a div to the panel
+      let panel = document.createElement('div');
+      panel.setAttribute('id', 'depview');
+      content.node.appendChild(panel);
+      return widget;
+    };
+    let widget = newWidget();
+    function openDepViewer() {
+      if (widget.isDisposed) {
+        widget = newWidget();
+        GraphManager.depview.isCreated = false;
       }
-      let widget = newWidget();
-          function openDepViewer(){
-              if (widget.isDisposed) {
-                widget = newWidget();
-                GraphManager.depview.isCreated = false;
-              }
-              if (!widget.isAttached) {
-                // Attach the widget to the main work area if it's not there
-                app.shell.add(widget, 'main',{
-                    mode: 'split-right',
-                    activate: false
-                });
-                if (!GraphManager.depview.isCreated){
-                  GraphManager.depview.createDepDiv();
-                }
-
-              }
-              // Activate the widget
-              app.shell.activateById(widget.id);
-              GraphManager.depview.isOpen = true;
-              GraphManager.depview.startGraphCreation();
-            }
-
-          nbTrackers.widgetAdded.connect((sender,nbPanel) => {
-            const session = nbPanel.sessionContext;
-              session.ready.then(() => {
-                if(session.session?.kernel?.name == 'dfpython3'){
-
-                    const button = new ToolbarButton({
-                        className: 'open-dep-view',
-                        label: 'Open Dependency Viewer',
-                        onClick: openDepViewer,
-                        tooltip: 'Opens the Dependency Viewer',
-                    });
-                    nbPanel.toolbar.insertItem(10, 'Open Dependency Viewer', button);
-                }
-              });
-           });
-
-          // Add an application command
-          const command: string = 'depview:open';
-          app.commands.addCommand(command, {
-            label: 'Open Dependency Viewer',
-            execute: () => openDepViewer,
-          });
-
-          // Add the command to the palette.
-          palette.addItem({ command, category: 'Tutorial' });
+      if (!widget.isAttached) {
+        // Attach the widget to the main work area if it's not there
+        app.shell.add(widget, 'main', {
+          mode: 'split-right',
+          activate: false
+        });
+        if (!GraphManager.depview.isCreated) {
+          GraphManager.depview.createDepDiv();
         }
+      }
+      // Activate the widget
+      app.shell.activateById(widget.id);
+      GraphManager.depview.isOpen = true;
+      GraphManager.depview.startGraphCreation();
+    }
+
+    app.commands.addCommand(CommandIDs.depViewerCmd, {
+      label: 'Open Dependency Viewer',
+      caption: 'Open Dependency Viewer',
+      execute: args => {
+        openDepViewer();
+      },
+      icon: args => (args.toolbar ? depViewerIcon : undefined),
+    });
+
+    // Add the command to the palette.
+    // FIXME why is this tutorial category?
+    palette.addItem({ command: CommandIDs.depViewerCmd, category: 'Tutorial' });
+  }
 };
 
-// /**
-//  * Initialization data for the Minimap extension.
-//  */
+/**
+ * Initialization data for the Minimap extension.
+ */
 const MiniMap: JupyterFrontEndPlugin<void> = {
   id: 'dfnb-minimap',
   autoStart: true,
   requires: [ICommandPalette, INotebookTracker],
-  activate: (app: JupyterFrontEnd, palette: ICommandPalette, nbTrackers: INotebookTracker) => {
+  activate: (
+    app: JupyterFrontEnd,
+    palette: ICommandPalette,
+    nbTrackers: INotebookTracker
+  ) => {
+    const newWidget = () => {
+      const content = new ViewerWidget();
+      //Graph Manager maintains the flags on the widgets
+      GraphManager.miniWidget = content;
+      const widget = new MainAreaWidget({ content });
+      widget.id = 'dfnb-minimap';
+      widget.title.label = 'Notebook Minimap';
+      widget.title.closable = true;
+      // Add a div to the panel
+      let panel = document.createElement('div');
+      panel.setAttribute('id', 'minimap');
+      let inner = document.createElement('div');
+      inner.setAttribute('id', 'minidiv');
+      let svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttributeNS(
+        'http://www.w3.org/2000/xmlns/',
+        'xmlns:xlink',
+        'http://www.w3.org/1999/xlink'
+      );
+      svg.setAttribute('id', 'minisvg');
+      inner.append(svg);
 
-      const newWidget = () => {
-          const content = new ViewerWidget();
-          //Graph Manager maintains the flags on the widgets
-          GraphManager.miniWidget = content;
-          const widget = new MainAreaWidget({ content });
-          widget.id = 'dfnb-minimap';
-          widget.title.label = 'Notebook Minimap';
-          widget.title.closable = true;
-          // Add a div to the panel
-            let panel = document.createElement('div');
-            panel.setAttribute('id','minimap');
-            let inner = document.createElement('div');
-            inner.setAttribute('id','minidiv');
-            let svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-            svg.setAttributeNS("http://www.w3.org/2000/xmlns/", "xmlns:xlink", "http://www.w3.org/1999/xlink");
-            svg.setAttribute('id','minisvg');
-            inner.append(svg);
+      panel.appendChild(inner);
+      content.node.appendChild(panel);
+      return widget;
+    };
+    let widget = newWidget();
 
-            panel.appendChild(inner);
-            content.node.appendChild(panel);
-            return widget;
-       }
-        let widget = newWidget();
+    function openMinimap() {
+      if (widget.isDisposed) {
+        widget = newWidget();
+        GraphManager.minimap.wasCreated = false;
+      }
+      if (!widget.isAttached) {
+        app.shell.add(widget, 'main', {
+          mode: 'split-right',
+          activate: false
+        });
+        //'right');
 
-        nbTrackers.widgetAdded.connect((sender,nbPanel) => {
-            const session = nbPanel.sessionContext;
-              session.ready.then(() => {
-                if(session.session?.kernel?.name == 'dfpython3'){
+        if (!GraphManager.minimap.wasCreated) {
+          console.log(
+            'Active Graph',
+            GraphManager.graphs[GraphManager.currentGraph]
+          );
 
-                    const button = new ToolbarButton({
-                        className: 'open-mini-map',
-                        label: 'Open Minimap',
-                        onClick: openMinimap,
-                        tooltip: 'Opens the Minimap',
-                    });
-                    nbPanel.toolbar.insertItem(10, 'Open Minimap', button);
-                }
-              });
-           });
-
-          function openMinimap(){
-
-              if (widget.isDisposed) {
-                widget = newWidget();
-                GraphManager.minimap.wasCreated = false;
-              }
-              if (!widget.isAttached) {
-
-                app.shell.add(widget, 'main'
-                ,{
-                    mode: 'split-right',
-                    activate: false
-                });
-                //'right');
-
-                if(!GraphManager.minimap.wasCreated){
-                    console.log("Active Graph",GraphManager.graphs[GraphManager.currentGraph])
-
-                    // Activate the widget
-                    app.shell.activateById(widget.id);
-                    GraphManager.minimap.createMiniArea();
-                    GraphManager.minimap.wasCreated = true;
-                }
-                else{
-                    GraphManager.minimap.startMinimapCreation();
-                }
-
-              }
-            }
-
-          // Add an application command
-          const command: string = 'minimap:open';
-          app.commands.addCommand(command, {
-            label: 'Open Minimap',
-            execute: () => openMinimap,
-          });
-
-          // Add the command to the palette.
-          palette.addItem({ command, category: 'Tutorial' });
+          // Activate the widget
+          app.shell.activateById(widget.id);
+          GraphManager.minimap.createMiniArea();
+          GraphManager.minimap.wasCreated = true;
+        } else {
+          GraphManager.minimap.startMinimapCreation();
         }
-};
+      }
+    }
 
+    app.commands.addCommand(CommandIDs.minimapCmd, {
+      label: 'Open Minimap',
+      caption: 'Open Minimap',
+      execute: args => {
+        openMinimap();
+      },
+      icon: args => (args.toolbar ? minimapIcon : undefined)
+    });
+
+    // Add the command to the palette.
+    // FIXME why is this tutorial category?
+    palette.addItem({ command: CommandIDs.minimapCmd, category: 'Tutorial' });
+  }
+};
 
 const cellToolbar: JupyterFrontEndPlugin<void> = {
   id: '@dfnotebook/dfnotebook-extension:cell-toolbar',
@@ -674,96 +692,107 @@ const cellToolbar: JupyterFrontEndPlugin<void> = {
   optional: [ISettingRegistry, IToolbarWidgetRegistry, ITranslator]
 };
 
-/**
- * Creates the toggle switch used for hiding/showing cell names
- */
-class ToggleCellNamesWidget extends Widget {
-  constructor(nbPanel: NotebookPanel, app: JupyterFrontEnd) {
-    super();
-    this.addClass('jupyter-toggle-switch-widget');
-
-    const containerDiv = document.createElement('div');
-    containerDiv.className = 'toggle-container';
-
-    const labelText = document.createElement('span');
-    labelText.textContent = 'Tags';
-    labelText.className = 'toggle-label';
-
-    const label = document.createElement('label');
-    label.className = 'switch';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.checked = true;
-
-    const slider = document.createElement('span');
-    slider.className = 'slider round';
-
-    label.appendChild(input);
-    label.appendChild(slider);
-
-    containerDiv.appendChild(labelText);
-    containerDiv.appendChild(label);
-
-    const updateTooltip = (isChecked: boolean) => {
-      const tooltipText = isChecked ? `Toggle to hide cell names in the notebook`: `Toggle to show cell names in the notebook`;
-      label.title = tooltipText;
-      labelText.title = tooltipText;
-      slider.title = tooltipText;
-    };
-
-    updateTooltip(true);
-    updateNotebookCellsWithTag(nbPanel.model as DataflowNotebookModel, "", nbPanel.sessionContext,false, false, true);
-
-    input.addEventListener('change', async (event) => {
-      const isChecked = (event.target as HTMLInputElement).checked;
-      const notebook = nbPanel.content
-      const cellsArray = Array.from(notebook.widgets);
-      updateTooltip(isChecked);
-
-      cellsArray.forEach(cAny => {
-        const dfmetadata = cAny.model.getMetadata('dfmetadata');
-        if (cAny.model.type == 'code' && dfmetadata.tag){
-          const inputArea = (cAny as any).inputArea;
-          let currTag = dfmetadata.tag;
-          if (isChecked){
-            inputArea.addTag(currTag);
-          } else{
-            inputArea.addTag("");
-            dfmetadata.tag = currTag;
-            cAny.model.setMetadata('dfmetadata', dfmetadata);
-          }
+const panelToolbar: JupyterFrontEndPlugin<void> = {
+  id: '@dfnotebook/dfnotebook-extension:panel-toolbar',
+  description: 'Add dfnotebook toolbar items to the notebook panel.',
+  autoStart: true,
+  requires: [INotebookTracker],
+  activate: (app: JupyterFrontEnd, tracker: INotebookTracker) => {
+    app.commands.addCommand(CommandIDs.toggleCellNamesCmd, {
+      label: 'Toggle Cell Names',
+      caption: 'Toggle Cell Names',
+      execute: args => {
+        const current = tracker.currentWidget;
+        if (current) {
+          const notebook = current.content as DataflowNotebook;
+          notebook.toggleTagEnabled();
+          app.commands.notifyCommandChanged(CommandIDs.toggleCellNamesCmd);
+          const nbPanel = tracker.currentWidget;
+          updateNotebookCellsWithTag(nbPanel.model as DataflowNotebookModel, nbPanel.sessionContext, {});
         }
-      });
-
-      nbPanel.model?.setMetadata("enable_tags", isChecked);
-      app.commands.notifyCommandChanged('toolbar-button:set-cell-name')
-      await updateNotebookCellsWithTag(nbPanel.model as DataflowNotebookModel, "", nbPanel.sessionContext, !isChecked);
+      },
+      isEnabled: args => (tracker.currentWidget ? true : false),
+      icon: args => {
+        const current = tracker.currentWidget;
+        let tagsEnabled = true;
+        if (current) {
+          tagsEnabled = (current.model as DataflowNotebookModel).enableTags ?? true;
+        } else {
+          tagsEnabled = false;
+        }
+        return tagsEnabled ? tagOffIcon : tagIcon;
+      },
     });
 
-    this.node.appendChild(containerDiv);
+    app.commands.addCommand(CommandIDs.toggleReactiveCmd, {
+      label: 'Toggle Reactive Mode',
+      caption: 'Toggle Reactive Mode',
+      execute: args => {
+        const current = tracker.currentWidget;
+        if (current) {
+          const notebook = current.content;
+          const model = notebook.model as DataflowNotebookModel;
+          model.enableReactive = !model.enableReactive;
+          app.commands.notifyCommandChanged(CommandIDs.toggleReactiveCmd);
+        }
+      },
+      icon: args => {
+        const current = tracker.currentWidget;
+        let reactiveEnabled = true;
+        if (current) {
+          reactiveEnabled = (current.model as DataflowNotebookModel).enableReactive ?? true;
+        } else {
+          reactiveEnabled = false;
+        }
+        return reactiveEnabled ? nonReactiveIcon : reactiveIcon;
+      }
+    });    
   }
 }
 
-/**
- * Adds Tags toggle switch in frontend toolbar for dfkernels notebooks 
- */
-const ToggleCellNames: JupyterFrontEndPlugin<void> = {
-  id: 'toggle-cell-names',
+function addExecuteInputHandler(nbPanel: NotebookPanel) {
+  const sessionContext = nbPanel.sessionContext;
+  const kernel = sessionContext.session?.kernel;
+  kernel?.iopubMessage.connect(async (sender, msg : KernelMessage.IIOPubMessage) => {
+    switch (msg.header.msg_type) {
+      case 'execute_input':
+        const executionCount = (msg as KernelMessage.IExecuteInputMsg)
+          .content.execution_count;
+        if (executionCount !== null) {
+          const cellId = cellIdIntToStr(executionCount);
+          const matchingCell = nbPanel.content.widgets.find(cell => {
+            return truncateCellId(cell.model.id) === cellId;
+          }) as CodeCell;
+          const cellModel = matchingCell.model as IDataflowCodeCellModel;
+          cellModel.code = (msg as KernelMessage.IExecuteInputMsg).content.code;
+          matchingCell.model.outputs.clear();        
+        }
+        break;
+      default:
+        return true;
+    }
+    return true;
+  });
+}
+
+const dfNotebookSetupPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@dfnotebook/dfnotebook-extension:execute-input',
   autoStart: true,
   requires: [INotebookTracker],
-  activate: (app: JupyterFrontEnd, nbTrackers: INotebookTracker) => {
-    nbTrackers.widgetAdded.connect((sender,nbPanel) => {
-      const session = nbPanel.sessionContext;
-        session.ready.then(async () => {
-          if(session.session?.kernel?.name == 'dfpython3'){
-            const toggleSwitch = new ToggleCellNamesWidget(nbPanel, app);        
-            nbPanel.toolbar.insertItem(12, 'customToggleTag', toggleSwitch);
-          }
+  activate: (app: JupyterFrontEnd, tracker: INotebookTracker) => {
+    tracker.widgetAdded.connect((outerSender, nbPanel) => {
+      void Promise.all([
+        nbPanel.context.ready,
+        nbPanel.sessionContext.ready]).then(() => {
+          if (! nbPanel.model?.getMetadata('dfnotebook'))
+            return;
+          (nbPanel.content as DataflowNotebook).initializeState();
+          addExecuteInputHandler(nbPanel);
         });
-     });
-  }
-};
+      });
+    }
+  };
+
 
 const plugins: JupyterFrontEndPlugin<any>[] = [
   cellExecutor,
@@ -771,10 +800,11 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   widgetFactoryPlugin,
   trackerPlugin,
   cellToolbar,
+  panelToolbar,
   DepViewer,
   MiniMap,
   GraphManagerPlugin,
-  ToggleCellNames,
+  dfNotebookSetupPlugin
 ];
 export default plugins;
 
@@ -1243,7 +1273,7 @@ function activateNotebookHandler(
       autoStartDefault: factory.autoStartDefault
     });
   }
-
+  
   // Add main menu notebook menu.
   if (mainMenu) {
     populateMenus(mainMenu, isEnabled);
@@ -1428,6 +1458,7 @@ function addCommands(
     commands.notifyCommandChanged(CommandIDs.moveUp);
     commands.notifyCommandChanged(CommandIDs.moveDown);
     commands.notifyCommandChanged(CommandIDs.setCellName);
+    commands.notifyCommandChanged(CommandIDs.reactiveCodeCell);
   });
 
   commands.addCommand(CommandIDs.runAndAdvance, {
@@ -2666,27 +2697,15 @@ function addCommands(
   commands.addCommand(CommandIDs.addCellName, {
     label: 'Add Cell Name',
     execute: async args => {
-      const cell = tracker.currentWidget?.content.activeCell as CodeCell;
-      if (cell == null) {
+      const anyCell = tracker.currentWidget?.content.activeCell;
+      if (anyCell?.model.type !== 'code')
         return;
-      }
 
-      const existingCellTags = new Set();
-      let cells = tracker.currentWidget?.content.model?.cells;
-      if (cells){
-        for (let index = 0; index < cells.length; index++) {
-          let cAny = cells.get(index)
-          if (cAny.type == 'code'){
-            const dfmetadata = cAny.getMetadata('dfmetadata');
-            const cellTagvalue = dfmetadata.tag;
-            if(cellTagvalue){
-              existingCellTags.add(cellTagvalue);
-            }
-          }
-        }
-      }
+      const cell = anyCell.model as IDataflowCodeCellModel;
 
-      const inputArea = cell.inputArea as any;  
+      const notebook = tracker.currentWidget?.content.model as DataflowNotebookModel;
+      const existingCellTags = notebook.cellNames;
+
       const hexRegexp = new RegExp('^[0-9a-f]{8}$');
       const pythonVarRegexp = new RegExp('^[a-zA-Z0-9_]*$');
   
@@ -2713,7 +2732,7 @@ function addCommands(
       };
       
       const showAddTagDialog = async (errorMessage: string = ''): Promise<{ newTag: string } | null> => {
-        const dialogNode = createTagNode(inputArea.tag, errorMessage);
+        const dialogNode = createTagNode(cell.cellName || "", errorMessage);
         const widgetNode = new Widget();
         widgetNode.node.appendChild(dialogNode);
   
@@ -2745,22 +2764,23 @@ function addCommands(
       };
   
       const result = await showAddTagDialog();
-      const cellUUID = truncateCellId(cell.model.id)
       if (result) {
         const { newTag } = result;
-        inputArea.addTag(newTag);
+
+        cell.cellName = newTag;
         if (newTag && tracker.currentWidget?.content.model) {
-          let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
-          await updateNotebookCellsWithTag(notebook, cellUUID, tracker.currentWidget.sessionContext)
+          await updateNotebookCellsWithTag(notebook, tracker.currentWidget.sessionContext, {})
         }
       }
     },
     isEnabled: () => {
-      const cell = tracker.currentWidget?.content.activeCell as CodeCell;
-      const isTagsVisible = tracker.currentWidget?.model?.getMetadata('enable_tags');
-      if(cell && cell.model.type == 'code' && cell.inputArea){
-        const inputArea = cell.inputArea as DataflowInputArea;
-        return (inputArea.tag?.length ? false : true) && isTagsVisible;
+      if (tracker.currentWidget) {
+        const cell = tracker.currentWidget.content.activeCell;
+        const isTagsVisible = (tracker.currentWidget.model as DataflowNotebookModel).enableTags;
+        if (cell && cell.model.type == 'code') {
+          const model = cell.model as IDataflowCodeCellModel;
+          return (! model.cellName) && isTagsVisible;
+        }
       }
       return false;
     },
@@ -2773,30 +2793,18 @@ function addCommands(
   commands.addCommand(CommandIDs.modifyCellName, {
     label: 'Modify Cell Name',
     execute: async args => {
-      const cell = tracker.currentWidget?.content.activeCell as CodeCell;
-      const existingCellTags = new Set();
-
-      let cells = tracker.currentWidget?.content.model?.cells;
-      if (cells){
-        for (let index = 0; index < cells.length; index++) {
-          let cAny = cells.get(index)
-          if (cAny.type == 'code'){
-            const dfmetadata = cAny.getMetadata('dfmetadata');
-            const cellTagvalue = dfmetadata.tag;
-            if(cellTagvalue){
-              existingCellTags.add(cellTagvalue);
-            }
-          }
-        }
-      }
-
-      if (cell == null) {
+      if (!tracker.currentWidget) {
         return;
       }
-  
-      const inputArea = cell.inputArea as any;
-  
-      if (!inputArea.tag) {
+      const anyCell = tracker.currentWidget.content.activeCell;
+      const notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
+      const existingCellTags = notebook.cellNames;
+      if (anyCell?.model.type !== 'code')
+        return;
+
+      const cell = anyCell.model as IDataflowCodeCellModel;
+      const oldTag = cell.cellName;
+      if (!oldTag) {
         alert('This cell does not have a tag.');
         return;
       }
@@ -2805,7 +2813,7 @@ function addCommands(
       const pythonVarRegexp = new RegExp('^[a-zA-Z0-9_]*$');
   
       // Function to create the dialog node
-      const createRenameTagNode = (oldTag: string, errorMessage: string = ''): HTMLElement => {
+      const createRenameTagNode = (oldTag: string | undefined, errorMessage: string = ''): HTMLElement => {
         const body = document.createElement('div');
   
         const inputLabel = document.createElement('label');
@@ -2843,7 +2851,7 @@ function addCommands(
       };
   
       const showModifyTagDialog = async (errorMessage: string = ''): Promise<{ newTag: string, updateReferences: boolean } | null> => {
-        const dialogNode = createRenameTagNode(inputArea.tag, errorMessage);
+        const dialogNode = createRenameTagNode(oldTag, errorMessage);
         const widgetNode = new Widget();
         widgetNode.node.appendChild(dialogNode);
         
@@ -2883,58 +2891,39 @@ function addCommands(
       };
   
       const result = await showModifyTagDialog();
-      const cellUUID = truncateCellId(cell.model.id);
+      const cellUUID = cell.cellId;
       if (result) {
         const { newTag, updateReferences } = result;
-        inputArea.addTag(newTag);
+        cell.cellName = newTag;
 
-        if (updateReferences && tracker.currentWidget?.content.model) {
-          let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
-          await updateNotebookCellsWithTag(notebook, cellUUID, tracker.currentWidget.sessionContext)
-        } else if (updateReferences == false && tracker.currentWidget?.content.model) {
-          let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
-          const all_tags: { [key: string]: string } = {};
-
-          for (let index = 0; index < notebook.cells.length; index++) {
-            const cAny = notebook.cells.get(index) as ICodeCellModel;
-            if (notebook.cells.get(index).type === 'code') {
-              const c = cAny as ICodeCellModel;
-              const cId = truncateCellId(c.id);
-              const dfmetadata = c.getMetadata('dfmetadata');
-              if (dfmetadata.tag){
-                all_tags[cId] = dfmetadata.tag;
-              }
-            }
+        // if deleted and update refs is checked, need to remove tag
+        // from the cells that reference... (reset to id)
+        // if modified and update refs is not checked, need to
+        // keep tags as they are...
+        // set the source?
+        const tagRemap: { [key: string]: any } = {};
+        if (updateReferences) {
+          if (!newTag || newTag.trim() === '') {
+            tagRemap[oldTag] = { tag: null, id: cellUUID };
+          } else {
+            tagRemap[oldTag] = { tag: newTag, id: cellUUID };
           }
-          
-          for (let index = 0; index < notebook.cells.length; index++) {
-            const cAny = notebook.cells.get(index) as ICodeCellModel;
-            if (cAny.type == 'code') {
-              const dfmetadata = notebook.cells.get(index).getMetadata('dfmetadata');
-              let inputVarsMetadata = dfmetadata.inputVars;
-              if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
-                const refValue = inputVarsMetadata.ref as { [key: string]: any };
-                const tagRefValue: { [key: string]: any } = {};
-                for (const ref_key in refValue) {
-                  if (ref_key != cellUUID && all_tags.hasOwnProperty(ref_key)) {
-                    tagRefValue[ref_key] = all_tags[ref_key];
-                  }
-                }
-                dfmetadata.inputVars = { 'ref': refValue, 'tag_refs': tagRefValue };
-                notebook.cells.get(index).setMetadata('dfmetadata', dfmetadata);
-                await updateNotebookCellsWithTag(notebook, cellUUID, tracker.currentWidget.sessionContext, false, true)
-              }
-            }
-          }
+        } else {
+          tagRemap[oldTag] = { tag: null, id: oldTag };
         }
+        
+        await updateNotebookCellsWithTag(notebook, tracker.currentWidget.sessionContext, tagRemap);        
       }
     },
     isEnabled: () => {
-      const cell = tracker.currentWidget?.content.activeCell as CodeCell;
-      const isTagsVisible = tracker.currentWidget?.model?.getMetadata('enable_tags');
-      if (cell && cell.model.type == 'code' && cell.inputArea) {
-        const inputArea = cell.inputArea as DataflowInputArea;
-        return inputArea.tag?.length && isTagsVisible;
+      if (tracker.currentWidget) {
+        const cell = tracker.currentWidget.content.activeCell;
+        const isTagsVisible = (tracker.currentWidget.model as DataflowNotebookModel).enableTags;
+
+        if (cell && cell.model.type == 'code') {
+          const model = cell.model as IDataflowCodeCellModel;
+          return (!!model.cellName && isTagsVisible);
+        }
       }
       return false;
     },
@@ -2945,12 +2934,14 @@ function addCommands(
   });
 
   commands.addCommand(CommandIDs.setCellName, {
-    label: 'Cell Name',
-    caption: 'Cell Name',
+    label: 'Set Cell Name',
+    caption: 'Set Cell Name',
     execute: args => {
-      const cell = tracker.currentWidget?.content.activeCell as CodeCell;
-      const inputArea = cell.inputArea as DataflowInputArea;
-      if(cell && inputArea && inputArea.tag){
+      const cell = tracker.currentWidget?.content.activeCell;
+      if (cell?.model.type !== 'code')
+        return;
+
+      if ((cell.model as IDataflowCodeCellModel).cellName){
         commands.execute('notebook:modify-cell-name');
       }
       else{
@@ -2958,9 +2949,12 @@ function addCommands(
       }
     },
     isEnabled: () => {
-      const isDfnotebook = tracker.currentWidget?.model?.getMetadata('dfnotebook')
-      const isTagsVisible = tracker.currentWidget?.model?.getMetadata('enable_tags');
-      return isDfnotebook && isTagsVisible;
+      if (tracker.currentWidget) {
+        const isDfnotebook = tracker.currentWidget.model?.getMetadata('dfnotebook')
+        const isTagsVisible = (tracker.currentWidget.model as DataflowNotebookModel).enableTags;
+        return isDfnotebook && isTagsVisible;
+      }
+      return false;
     },
     isVisible: () => {
       const isDfnotebook = tracker.currentWidget?.model?.getMetadata('dfnotebook')
@@ -2970,85 +2964,52 @@ function addCommands(
     icon: args => (args.toolbar ? tagIcon : undefined)
   });
 
+  commands.addCommand(CommandIDs.reactiveCodeCell, {
+    label: trans.__('Reactive'),
+    caption: trans.__('Reactive'),
+    execute: args => {
+      const cell = tracker.currentWidget?.content.activeCell?.model as IDataflowCodeCellModel;
+      cell.autoUpdate = !cell.autoUpdate;
+      commands.notifyCommandChanged('toolbar-button:reactive-cell')
+    },
+    isEnabled: () => {
+      if (tracker.currentWidget) {
+        const isDfnotebook = tracker.currentWidget.model?.getMetadata('dfnotebook')
+        const reactiveModeOn = (tracker.currentWidget.model as DataflowNotebookModel).enableReactive;
+        return isDfnotebook && reactiveModeOn;
+      }
+      return false;
+    },
+    isVisible: () => {
+      const isDfnotebook = tracker.currentWidget?.model?.getMetadata('dfnotebook')
+      return isDfnotebook;
+    },
+    icon: args => {
+      if (!args.toolbar) return undefined;
+      const cell = tracker.currentWidget?.content.activeCell?.model as IDataflowCodeCellModel
+
+      // assume reactive unless otherwise indicated
+      return cell.autoUpdate ?? true ? nonReactiveIcon : reactiveIcon;
+    }
+  });
+
   // !!! END DATAFLOW NOTEBOOK CHANGE !!!
 }
 
 /**
  * Update code based on add, delete or modified tag value
  */
-export async function updateNotebookCellsWithTag(notebook: DataflowNotebookModel, cellUUID: string, sessionContext: ISessionContext, hideTags: boolean=false, updateInputTagsOnly: boolean=false, initialStart: boolean=false) {
-  let dfData = getCellsMetadata(notebook, '');
   
-  if (hideTags) {
-    dfData.dfMetadata.input_tags = {};
-  }
-
-  if (updateInputTagsOnly){
-    dfData.dfMetadata.all_refs = {}
-    dfData.dfMetadata.output_tags = {}
-    dfData.dfMetadata.code_dict = {}
-  }
-
-  if(initialStart){
-    const cellsArray = Array.from(notebook.cells);
-
-    cellsArray.forEach((cell, index) => {
-      if (cell.type === 'code') {
-        const cAny = cell as CodeCellModel;
-        const cId = truncateCellId(cAny.id);
-        //@ts-expect-error
-        cAny._executedCode = dfData.dfMetadata.code_dict[cId];;
-      }
-    });
-    dfData.dfMetadata.executed_code = dfData.dfMetadata.code_dict
-  }
-
+export async function updateNotebookCellsWithTag(notebook: DataflowNotebookModel, sessionContext: ISessionContext, tagRemap: JSONObject) {
+  const codeCellData = notebook.getDataflowCodeCellData();
+  const useTags = notebook.enableTags ?? false;
   try {
-    const response = await dfCommGetData(sessionContext, {'dfMetadata': dfData.dfMetadata, 'updateExecutedCode': true});
-    updateNotebookCells(notebook, response, cellUUID, hideTags);
+    const response = await dfCommGetData(sessionContext, {'dfMetadata': {'cell_data_dict': codeCellData}, 'updateExecutedCode': true, useTags, tagRemap});
+    console.log("Response from dfCommGetData:", response);
+    notebook.updateDataflowCodeCellData(response.cell_data_dict)    
   } catch (error) {
     console.error('Error occured during kernel communication', error);
   }
-}
-
-function updateNotebookCells(notebook: DataflowNotebookModel, content: any, cellUUID: string, hideTags: boolean): void {
-  const all_Tags = getAllTags(notebook);
-  const cellsArray = Array.from(notebook.cells);
-
-  cellsArray.forEach((cell, index) => {
-    if (cell.type === 'code') {
-      const cAny = cell as CodeCellModel;
-      const cId = truncateCellId(cAny.id);
-
-      // Handle executed code updates
-      if (content.executed_code_dict?.hasOwnProperty(cId)) {
-        //@ts-expect-error
-        cAny._executedCode = content.executed_code_dict[cId];
-      }
-
-      // Handle code dictionary updates
-      if (content.code_dict?.hasOwnProperty(cId)) {
-        cAny.sharedModel.setSource(content.code_dict[cId]);
-      }
-
-      //Updating the dependent cell's df-metadata when any cell is tagged/untagged
-      if (cellUUID && !hideTags) {
-        const dfmetadata = cAny.getMetadata('dfmetadata');
-        const inputVarsMetadata = dfmetadata.inputVars;
-        if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
-          const refValue = inputVarsMetadata.ref as { [key: string]: any };
-          let tagRefValue = inputVarsMetadata.tag_refs as { [key: string]: any };
-          for (const ref_key in refValue) {
-            if (ref_key == cellUUID && all_Tags.hasOwnProperty(ref_key)) {
-              tagRefValue[cellUUID] = all_Tags[cellUUID];
-            }
-          }
-          dfmetadata.inputVars = { 'ref': refValue, 'tag_refs': tagRefValue };
-          notebook.cells.get(index).setMetadata('dfmetadata', dfmetadata);
-        }
-      }
-    }
-  });
 }
 
 /**
@@ -3149,7 +3110,8 @@ function populatePalette(
     CommandIDs.setSideBySideRatio,
     CommandIDs.enableOutputScrolling,
     CommandIDs.disableOutputScrolling,
-    CommandIDs.setCellName
+    CommandIDs.setCellName,
+    CommandIDs.reactiveCodeCell
   ].forEach(command => {
     palette.addItem({ command, category });
   });
