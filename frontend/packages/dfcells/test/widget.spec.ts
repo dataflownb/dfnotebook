@@ -5,14 +5,14 @@ import { createStandaloneCell, YCodeCell } from '@jupyter/ydoc';
 import { ISessionContext, SessionContext } from '@jupyterlab/apputils';
 import { createSessionContext } from '@jupyterlab/apputils/lib/testutils';
 import {
-  //Cell,
+  Cell as JupyterCell,
   CellFooter,
   CellHeader,
   CellModel,
-  //CodeCell,
-  CodeCellModel,
-  //InputArea,
-  //InputPrompt,
+  // CodeCell,
+  // CodeCellModel,
+  InputArea,
+  InputPrompt,
   //MarkdownCell,
   MarkdownCellModel,
   //RawCell,
@@ -22,9 +22,9 @@ import {
 import {
   DataflowCell as Cell,
   DataflowCodeCell as CodeCell,
+  DataflowCodeCellModel as CodeCellModel,
+  IDataflowCellData,
   DataflowMarkdownCell as MarkdownCell,
-  DataflowInputArea as InputArea,
-  DataflowInputPrompt as InputPrompt,
   DataflowRawCell as RawCell
 } from '@dfnotebook/dfcells';
 
@@ -41,6 +41,10 @@ import {
 import { Message, MessageLoop } from '@lumino/messaging';
 import { Widget } from '@lumino/widgets';
 import { truncateCellId } from '@dfnotebook/dfutils';
+
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect } from '@jest/globals';
+import { JSONObject, UUID } from '@lumino/coreutils';
+import { IExecuteReplyMsg } from '@jupyterlab/services/lib/kernel/messages';
 
 const RENDERED_CLASS = 'jp-mod-rendered';
 const rendermime = defaultRenderMime();
@@ -111,6 +115,71 @@ class LogMarkdownCell extends MarkdownCell {
     this.methods.push('onUpdateRequest');
   }
 }
+
+function createCodeCellData(code: string, cellId: string): IDataflowCellData {
+  return {
+    code,
+    cell_id: cellId,
+    input_refs: {},
+    output_tags: [],
+    auto_update: false,
+    force_cached: false
+  };
+}
+
+interface ICodeCellFutureOptions {
+  cellId?: string;
+  model?: CodeCellModel;
+  metadata?: JSONObject;
+  cellDataDict?: { [cellId: string]: IDataflowCellData };
+  cellModelMap?: { [cellId: string]: CodeCellModel };
+}
+
+function createCodeCellExecuteFuture(
+  code: string,
+  sessionContext: ISessionContext,
+  contentFactory: JupyterCell.IContentFactory,
+  options: ICodeCellFutureOptions = {}
+): {future: Promise<IExecuteReplyMsg>, widget: CodeCell, model: CodeCellModel, metadata: JSONObject, cellDataDict: { [cellId: string]: IDataflowCellData }, cellModelMap: { [cellId: string]: CodeCellModel }} {
+  let {cellId, model, metadata, cellDataDict, cellModelMap} = options;
+  if (cellId === undefined)
+    cellId = truncateCellId(UUID.uuid4());
+  if (model === undefined)
+    model = new CodeCellModel();
+  if (metadata === undefined)
+    metadata = {};
+  if (cellDataDict === undefined) {
+    cellDataDict = {};
+  }
+  cellDataDict[cellId] = createCodeCellData(code, cellId);
+  if (cellModelMap === undefined) {
+    cellModelMap = {};
+  }
+  cellModelMap[cellId] = model;
+
+  const dfData = {
+    uuid: cellId,
+    cell_data_dict: cellDataDict
+  } as JSONObject;
+
+  const widget = new CodeCell({
+    model,
+    rendermime,
+    contentFactory,
+    placeholder: false
+  });
+  widget.initializeState();
+  const future = CodeCell.execute(
+    widget,
+    sessionContext,
+    metadata,
+    dfData,
+    cellModelMap
+  ) as Promise<IExecuteReplyMsg>;
+
+  return {future, widget, model, metadata, cellDataDict, cellModelMap};
+}
+
 
 describe('cells/widget', () => {
   const editorFactory = NBTestUtils.editorFactory;
@@ -557,8 +626,8 @@ describe('cells/widget', () => {
       });
     });
 
-    describe('#dfmetadata', () => {
-      it('should set dfmetadata when initializing', () => {
+    describe('#dfnotebook', () => {
+      it('should set dfnotebook metadata when initializing', () => {
         const model = new CodeCellModel();
         const widget = new CodeCell({
           model,
@@ -567,25 +636,27 @@ describe('cells/widget', () => {
         });
 
         widget.initializeState();
-        const dfmetadata = widget.model.getMetadata('dfmetadata');
+        const dfmetadata = widget.model.getDataflowMetadata();
         expect(dfmetadata).toBeDefined();
         expect(dfmetadata).toEqual(expect.objectContaining({
-          tag: "",
-          inputVars: { ref: {}, tag_refs: {} },
-          outputVars: [],
-          persistentCode: ""
+            output_tags: [],
+            input_refs: {},
+            auto_update: true,
+            force_cached: false
         }));
       });
   
-      it('should not overwrite existing dfmetadata', () => {
+      it('should not overwrite existing dfnotebook metadata', () => {
         const model = new CodeCellModel();
         const existingDfmetadata = {
-          tag: "existing",
-          inputVars: { ref: { 'a': '1' }, tag_refs: { 'b': '2' } },
-          outputVars: ['c', 'd'],
-          persistentCode: "print('hello')"
+          name: "existing",
+          input_refs: { 'a': ['ce111d21']},
+          output_tags: ['c', 'd'],
+          persistent_code: "c, d = a + 1, 2",
+          auto_update: false,
+          force_cached: false
         };
-        model.setMetadata('dfmetadata', existingDfmetadata);
+        model.setDataflowMetadata(existingDfmetadata);
   
         const widget = new CodeCell({
           model,
@@ -595,11 +666,11 @@ describe('cells/widget', () => {
 
         widget['initializeDOM']();
         
-        const dfmetadata = widget.model.getMetadata('dfmetadata');
-        expect(dfmetadata.inputVars).toEqual(existingDfmetadata.inputVars);
-        expect(dfmetadata.outputVars.length).toBe(2);
-        expect(dfmetadata.outputVars).toEqual(existingDfmetadata.outputVars);
-        expect(dfmetadata.persistentCode).toBe("print('hello')");
+        const dfmetadata = widget.model.getDataflowMetadata();
+        expect(dfmetadata.input_refs).toEqual(existingDfmetadata.input_refs);
+        expect(dfmetadata.output_tags.length).toBe(2);
+        expect(dfmetadata.output_tags).toEqual(existingDfmetadata.output_tags);
+        expect(dfmetadata.persistent_code).toBe(existingDfmetadata.persistent_code);
       });
     });
 
@@ -901,9 +972,9 @@ describe('cells/widget', () => {
       it('should fire when model metadata changes', () => {
         const method = 'onMetadataChanged';
         const widget = new LogCodeCell().initializeState();
-        expect(widget.methods.filter(m => m === method).length).toBe(1);
+        expect(widget.methods).not.toContain(method);
         widget.model.setMetadata('foo', 1);
-        expect(widget.methods.filter(m => m === method).length).toBe(2);
+        expect(widget.methods).toContain(method);
       });
     });
 
@@ -937,39 +1008,19 @@ describe('cells/widget', () => {
       });
 
       it('should fulfill a promise if there is no code to execute', async () => {
-        const widget = new CodeCell({
-          model,
-          rendermime,
-          contentFactory,
-          placeholder: false
-        });
-        widget.initializeState();
-        let uuid = truncateCellId(widget.model.id);
-        let mockdata = {'uuid':uuid,'code_dict':{uuid:''}};
-        let mockmap = {uuid:widget.model};
-        await expect(
-          CodeCell.execute(widget, sessionContext,{},mockdata,mockmap)
-        ).resolves.not.toThrow();
+        const {future, widget} = createCodeCellExecuteFuture('', sessionContext, contentFactory);
+        await expect(future).resolves.not.toThrow();
+        widget.dispose();
       });
-      //FIXME: This test currently fails due to session info not being assigned during testing not sure what causes this
-      it('should fulfill a promise if there is code to execute', async () => {
-        const widget = new CodeCell({
-          model,
-          rendermime,
-          contentFactory,
-          placeholder: false
-        });
-        widget.initializeState();
-        widget.model.sharedModel.setSource('foo = 3');
-
-        let uuid = truncateCellId(widget.model.id);
-        let mockdata = {'uuid':uuid,'code_dict':{uuid:''}};
-        let mockmap = {uuid:widget.model};
-        const originalexecutionCount = widget.promptNode!.textContent;
-        
-        await CodeCell.execute(widget, sessionContext,{},mockdata,mockmap);
-        const executionCount = widget.promptNode!.textContent;
-        expect(executionCount).toEqual(originalexecutionCount);
+      it('should maintain the same cell id', async () => {
+        const {future, widget} = createCodeCellExecuteFuture('', sessionContext, contentFactory);
+        // FIXME should this be cellid?
+        const originalCount = widget.model.executionCount;
+        widget.model.sharedModel.setSource('foo = 42');
+        await future;
+        const executionCount = widget.model.executionCount;
+        expect(executionCount).toEqual(originalCount);
+        widget.dispose();
       });
 
       const TIMING_KEYS = [
@@ -980,63 +1031,45 @@ describe('cells/widget', () => {
         'iopub.status.idle'
       ];
 
-      //FIXME: This test currently fails due to session info not being assigned during testing not sure what causes this
       it('should not save timing info by default', async () => {
-        const widget = new CodeCell({
-          model,
-          rendermime,
-          contentFactory,
-          placeholder: false
-        });
-        let uuid = truncateCellId(widget.model.id);
-        let mockdata = {'uuid':uuid,'code_dict':{uuid:''}};
-        let mockmap = {uuid:widget.model};
-        await CodeCell.execute(widget, sessionContext,{},mockdata,mockmap);
+        const {future, widget} = createCodeCellExecuteFuture('', sessionContext, contentFactory);
+        await future;
         expect(widget.model.getMetadata('execution')).toBeUndefined();
+        widget.dispose();
       });
-      //FIXME: This test currently fails due to session info not being assigned during testing not sure what causes this
+
       it('should save timing info if requested', async () => {
-        const widget = new CodeCell({
-          model,
-          rendermime,
-          contentFactory,
-          placeholder: false
-        });
-        let uuid = truncateCellId(widget.model.id);
-        let mockdata = {'uuid':uuid,'code_dict':{uuid:''}};
-        let mockmap = {uuid:widget.model};
-        await CodeCell.execute(widget, sessionContext, { recordTiming: true },mockdata,mockmap);
+        const {future, widget} = createCodeCellExecuteFuture('', sessionContext, contentFactory, { metadata: { recordTiming: true }});
+        await future;
         expect(widget.model.getMetadata('execution')).toBeDefined();
         const timingInfo = widget.model.getMetadata('execution') as any;
         for (const key of TIMING_KEYS) {
           expect(timingInfo[key]).toBeDefined();
         }
+        widget.dispose();
       });
-      //FIXME: This test currently fails due to session info not being assigned during testing not sure what causes this
+
       it('should set the cell prompt properly while executing', async () => {
-        const widget = new CodeCell({
-          model,
-          rendermime,
-          contentFactory,
-          placeholder: false
-        });
-        widget.initializeState();
-        widget.model.sharedModel.setSource('foo = 3');
-        
-        let uuid = truncateCellId(widget.model.id);
-        let mockdata = {'uuid':uuid,'code_dict':{uuid:''}};
-        let mockmap = {uuid:widget.model};
-        const future1 = CodeCell.execute(widget, sessionContext,{},mockdata,mockmap);
-        expect(widget.promptNode!.textContent).toEqual('[*]:');//new RegExp('\\[[a-zA-Z0-9]{8}\\]:'));
-        const future2 = CodeCell.execute(widget, sessionContext,{},mockdata,mockmap);
-        expect(widget.promptNode!.textContent).toEqual('[*]:');//new RegExp('\\[[a-zA-Z0-9]{8}\\]:'));
+        const {future: future1, widget: widget, metadata, cellDataDict, cellModelMap} = createCodeCellExecuteFuture('bar', sessionContext, contentFactory);
+        const dfData = {
+          uuid: widget.model.cellId,
+          cell_data_dict: cellDataDict
+        } as JSONObject;
+        const future2 = CodeCell.execute(
+          widget,
+          sessionContext,
+          metadata,
+          dfData,
+          cellModelMap
+        ) as Promise<IExecuteReplyMsg>;
+
+        expect(widget.promptNode!.textContent).toEqual('[*]:');
         await expect(future1).rejects.toThrow('Canceled');
         expect(widget.promptNode!.textContent).toEqual('[*]:');
         const msg = await future2;
         expect(msg).not.toBeUndefined();
-
         expect(widget.promptNode!.textContent).toEqual(
-          `[${truncateCellId(widget.model.id)}]:`
+          `[${widget.model.cellId}]:`
         );
       });
     });
