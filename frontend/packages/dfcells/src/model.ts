@@ -15,7 +15,7 @@ export interface IDataflowCellMetadata extends PartialJSONObject {
     executed_code?: string;
     name?: string;
     output_tags: string[];
-    input_refs: { [var_name: string]: [cell_id: string][] };
+    input_refs: { [var_name: string]: string[] };
     auto_update: boolean;
     force_cached: boolean;
 }
@@ -44,8 +44,8 @@ export interface IDataflowCodeCellModel extends ICodeCellModel {
     get outputTags(): string[];
     set outputTags(value: string[]);
 
-    get inputRefs(): { [var_name: string]: [cell_id: string][] };
-    set inputRefs(value: { [var_name: string]: [cell_id: string][] });
+    get inputRefs(): { [var_name: string]: string[] };
+    set inputRefs(value: { [var_name: string]: string[] });
 
     get autoUpdate(): boolean;
     set autoUpdate(value: boolean);
@@ -112,11 +112,11 @@ export class DataflowCodeCellModel extends CodeCellModel implements IDataflowCod
         this.setDataflowMetadata(dfmetadata);
     }
 
-    public get inputRefs(): { [var_name: string]: [cell_id: string][] } {
+    public get inputRefs(): { [var_name: string]: string[] } {
         return this.getDataflowMetadata().input_refs;
     }
 
-    public set inputRefs(inputRefs: { [var_name: string]: [cell_id: string][] }) {
+    public set inputRefs(inputRefs: { [var_name: string]: string[] }) {
         const dfmetadata = this.getDataflowMetadata();
         dfmetadata.input_refs = inputRefs;
         this.setDataflowMetadata(dfmetadata);
