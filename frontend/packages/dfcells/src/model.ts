@@ -1,4 +1,4 @@
-import { truncateCellId } from '@dfnotebook/dfutils';
+import { cellIdStrToInt, truncateCellId } from '@dfnotebook/dfutils';
 import {CodeCellModel, ICodeCellModel} from '@jupyterlab/cells';
 import { PartialJSONObject } from '@lumino/coreutils';
 
@@ -87,6 +87,14 @@ export class DataflowCodeCellModel extends CodeCellModel implements IDataflowCod
 
     public get cellId(): string {
         return truncateCellId(this.id);
+    }
+
+    public get executionCount(): number {
+        return cellIdStrToInt(this.cellId);
+    }
+    
+    public set executionCount(value: number) {
+        return;        
     }
 
     public get cellName(): string | undefined {
