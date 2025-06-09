@@ -289,6 +289,7 @@ export namespace DataflowCodeCell {
       future = cell.outputArea.future;
       const msg = (await msgPromise)!;
       model.executionCount = msg.content.execution_count;
+      cell.setPrompt()
       if (recordTiming) {
         const timingInfo = Object.assign(
           {},
