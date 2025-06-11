@@ -1,16 +1,5 @@
 Contact Information
 ===================
 
-David Koop
+Dataflow Notebooks Team
 
-dkoop@umassd.edu
-
-
-Colin Brown
-
-cbrown12@umassd.edu
-
-
-Hieu Ngo
-
-hngo1@umassd.edu
