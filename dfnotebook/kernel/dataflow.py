@@ -266,8 +266,13 @@ class DataflowController(object):
             self.links.remove_links(cid)
             del self.cells[cid]
 
-    def cells_to_dict(self):
-        return {cid: cell.to_dict() for cid, cell in self.cells.items()}
+    def cells_to_dict(self, only_executed=True):
+        if only_executed:
+            # only return updated data if the cell actually ran
+            return {cid: cell.to_dict() for cid, cell in self.cells.items() if cell.did_run}
+        else:
+            return {cid: cell.to_dict() for cid, cell in self.cells.items()}
+
 
     def execute_cell(self, cid, **flags):
         if cid not in self.cells:

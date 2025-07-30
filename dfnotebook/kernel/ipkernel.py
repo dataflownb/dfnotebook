@@ -470,7 +470,7 @@ class IPythonKernel(ipykernel.ipkernel.IPythonKernel):
                     tag_remap=tag_remap)
                 self.df_controller.cells[cell_id].executed_code = updated_executed_cell_data['code']
 
-        return self.df_controller.cells_to_dict()
+        return self.df_controller.cells_to_dict(only_executed=False)
 
 
 # This exists only for backwards compatibility - use IPythonKernel instead
