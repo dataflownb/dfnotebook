@@ -12,6 +12,7 @@ import {
   NotebookActions,
   setCellExecutor
 } from '@jupyterlab/notebook';
+import React from 'react';
 import ReactDOMServer from 'react-dom/server';
 import * as utils from './utils';
 import { runCell, 
