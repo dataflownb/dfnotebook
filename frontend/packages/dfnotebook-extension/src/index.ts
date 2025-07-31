@@ -2999,7 +2999,41 @@ function addCommands(
 /**
  * Update code based on add, delete or modified tag value
  */
-  
+export async function addCellName(notebook: DataflowNotebookModel, sessionContext: ISessionContext, cell: IDataflowCodeCellModel, cellName: string) {
+  cell.cellName = cellName;
+  await updateNotebookCellsWithTag(notebook, sessionContext, {});
+}
+
+export async function removeCellName(notebook: DataflowNotebookModel, sessionContext: ISessionContext, cell: IDataflowCodeCellModel, updateReferences: boolean) {
+  const oldTag = cell.cellName;
+  if (!oldTag)
+    return;
+  const tagRemap: { [key: string]: any } = {};
+  if (updateReferences)
+    tagRemap[oldTag] = { tag: null, id: cell.cellId };
+  else
+    tagRemap[oldTag] = { tag: null, id: oldTag };
+
+  cell.cellName = undefined;  
+  await updateNotebookCellsWithTag(notebook, sessionContext, tagRemap);
+}
+
+export async function changeCellName(notebook: DataflowNotebookModel, sessionContext: ISessionContext, cell: IDataflowCodeCellModel, cellName: string, updateReferences: boolean) {
+  const oldTag = cell.cellName;
+  if (!oldTag) {
+    await addCellName(notebook, sessionContext, cell, cellName)
+    return;
+  }
+
+  const tagRemap: { [key: string]: any } = {};
+  if (updateReferences)
+    tagRemap[oldTag] = { tag: cellName, id: cell.cellId };
+  else
+    tagRemap[oldTag] = { tag: null, id: oldTag };
+  cell.cellName = cellName;
+  await updateNotebookCellsWithTag(notebook, sessionContext, tagRemap);
+}
+
 export async function updateNotebookCellsWithTag(notebook: DataflowNotebookModel, sessionContext: ISessionContext, tagRemap: JSONObject) {
   const codeCellData = notebook.getDataflowCodeCellData();
   const useTags = notebook.enableTags ?? false;
