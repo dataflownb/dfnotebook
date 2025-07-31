@@ -739,8 +739,9 @@ describe('@jupyterlab/notebook', () => {
           { selectKernel: () => Promise.resolve() } as any
         );
         expect(result).toBe(true);
-        const cell = widget.activeCell as CodeCell;
-        expect(cell.model.executionCount).toBe(null);
+        // this is not true for dataflow notebook
+        // const cell = widget.activeCell as CodeCell;
+        // expect(cell.model.executionCount).toBe(null);
         expect(emitted).toBe(1);
       });
 
