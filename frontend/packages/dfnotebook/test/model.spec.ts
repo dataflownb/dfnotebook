@@ -334,7 +334,8 @@ describe('@jupyterlab/notebook', () => {
         const metadata = model.metadata;
         expect(metadata['kernelspec']).toBeTruthy();
         expect(metadata['language_info']).toBeTruthy();
-        expect(Object.keys(metadata)).toHaveLength(2);
+        expect(metadata['dfnotebook']).toBeTruthy();
+        expect(Object.keys(metadata)).toHaveLength(3);
       });
 
       it('should set the dirty flag when changed', () => {
