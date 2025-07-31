@@ -1,8 +1,6 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { getCellModel } from './model';
-
 import {
   CodeCell,
   MarkdownCell,
@@ -41,7 +39,12 @@ export namespace DataflowStaticNotebook {
       if (!options.contentFactory) {
         options.contentFactory = this;
       }
-      options.model = getCellModel(options.model.sharedModel) as DataflowCodeCellModel;
+      let model = DataflowNotebookModel.getCellModel(options.model.sharedModel) as DataflowCodeCellModel;
+      if (!model) {
+        console.warn("CREATING NEW MODEL (should be rare)", model);
+        model = new DataflowCodeCellModel({sharedModel: options.model.sharedModel});
+      }
+      options.model = model;
       return new DataflowCodeCell(options).initializeState();
     }
 
@@ -78,10 +81,6 @@ export namespace DataflowStaticNotebook {
 }
 
 export class DataflowNotebook extends Notebook { 
-  constructor(options: Notebook.IOptions) {
-    super(options);
-  }
-
   public initializeState() {
     this.model?.cells.changed.connect((sender, args) => {
       if (args.type === 'add')
@@ -97,7 +96,7 @@ export class DataflowNotebook extends Notebook {
     for (const index of indices) {
       requestAnimationFrame(() => {
         const anyCell = this.widgets[index];
-        if (anyCell.model.type == 'code') {
+        if (anyCell?.model?.type == 'code') {
           const cell = anyCell as DataflowCodeCell;
           cell.tagEnabled = tagsEnabled;
           cell.setPrompt();
@@ -109,7 +108,7 @@ export class DataflowNotebook extends Notebook {
   public toggleTagEnabled() {
     const model = this.model as DataflowNotebookModel;
     model.enableTags = !model.enableTags;
-    this.updateTagState()    
+    this.updateTagState()
   }
 }
 

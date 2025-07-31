@@ -1,24 +1,14 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { NotebookModel } from '@jupyterlab/notebook';
+import { CellList, NotebookModel } from '@jupyterlab/notebook';
 import * as nbformat from '@jupyterlab/nbformat';
 import { DataflowCodeCellModel, IDataflowCellData, IDataflowCodeCellModel } from '@dfnotebook/dfcells';
 import { PartialJSONObject } from '@lumino/coreutils';
 import { ISharedCodeCell } from '@jupyter/ydoc';
+import { ICellModel, ICodeCellModel } from '@jupyterlab/cells';
+import { IObservableList } from '@jupyterlab/observables';
 
-// keep track of the dataflow code cell models
-// so that the createCodeCell method in widget.ts
-// uses the correct model when creating a new cell
-const cellModelRegistry = new WeakMap<ISharedCodeCell, IDataflowCodeCellModel>();
-
-export function registerCellModel(shared: ISharedCodeCell, model: IDataflowCodeCellModel): void {
-  cellModelRegistry.set(shared, model);
-}
-
-export function getCellModel(shared: ISharedCodeCell): IDataflowCodeCellModel | undefined {
-  return cellModelRegistry.get(shared);
-}
 
 export interface IDataflowNotebookMetadata extends PartialJSONObject {
     enable_tags: boolean;
@@ -39,31 +29,54 @@ export class DataflowNotebookModel extends NotebookModel {
 
   // this is a hack because the CellList hardcodes CodeCellModel here
   // we want to replace it with DataflowCodeCellModel
-  public updateCodeCells() {
-    //@ts-expect-error
-    for (const anyModel of this.cells.model.cells) {
-      //@ts-expect-error
-      const curModel = this.cells._cellMap.get(anyModel);
-      if (curModel.type === 'code' && !( curModel instanceof DataflowCodeCellModel)) {
-        const sharedModel = anyModel as ISharedCodeCell;
-        const newModel = new DataflowCodeCellModel({
-          sharedModel: sharedModel
-        });
-
-        //@ts-expect-error
-        this.cells._cellMap.set(sharedModel, newModel);
-        curModel.sharedModel.changed.disconnect(curModel.onSharedModelChanged, curModel);
-        curModel.dispose();
-
-        sharedModel.disposed.connect(() => {
-          newModel.dispose();
-          //@ts-expect-error
-          this.cells._cellMap.delete(sharedModel);
-        });
-
-        registerCellModel(sharedModel, newModel);
-      }
+  public updateCodeCells(cellList: CellList, change: IObservableList.IChangedArgs<ICellModel>) {
+    if (change.type === 'set') {
+      this.updateRemovedCells(change.oldValues);
+      this.updateAddedCells(change.newValues);
+    } else if (change.type === 'remove') {
+      this.updateRemovedCells(change.oldValues);
+    } else if (change.type === 'add') {
+      this.updateAddedCells(change.newValues);
     }
+  }
+
+  public updateAddedCells(cells : ICellModel[]): void {
+    cells.forEach((anyModel) => {
+      if ((anyModel.type === 'code') && !(anyModel instanceof DataflowCodeCellModel)) {
+        const curModel = anyModel as ICodeCellModel;
+        const sharedModel = anyModel.sharedModel as ISharedCodeCell;
+        const newModel = new DataflowCodeCellModel({ sharedModel });
+        this.updateCodeCell(curModel, sharedModel, newModel);
+      }
+    });
+  }
+
+  public updateRemovedCells(cells: ICellModel[]): void {
+    cells.forEach((anyModel) => {
+      if ((anyModel?.type === 'code') && (anyModel instanceof DataflowCodeCellModel)) { 
+        const curModel = anyModel as ICodeCellModel;
+        DataflowNotebookModel.deleteCellModel(curModel.sharedModel);
+        curModel.dispose();
+      }
+    });
+  }
+
+  public updateCodeCell(curModel: ICodeCellModel, sharedModel: ISharedCodeCell, newModel: IDataflowCodeCellModel) {
+      //@ts-expect-error
+      this.cells._cellMap.set(sharedModel, newModel);
+      curModel.dispose();
+
+      //@ts-expect-error
+      sharedModel.changed.connect(newModel._onSharedModelChanged, newModel);
+
+      sharedModel.disposed.connect(() => {
+        newModel.dispose();
+        //@ts-expect-error
+        this.cells._cellMap.delete(sharedModel);
+      });
+
+      DataflowNotebookModel.registerCellModel(sharedModel, newModel);
+      return newModel;
   }
 
   public initializeDataflowMetadata() {
@@ -174,9 +187,27 @@ export class DataflowNotebookModel extends NotebookModel {
 
     if (!isDataflow) {
       this.deleteMetadata('dfnotebook');
+      return;
     }
 
     this.updateDataflowCodeCellsFromMetadata();
+  }
+
+}
+
+export namespace DataflowNotebookModel {
+  const cellModelRegistry = new Map<string, IDataflowCodeCellModel>();
+
+  export function registerCellModel(shared: ISharedCodeCell, model: IDataflowCodeCellModel): void {
+    cellModelRegistry.set(shared.id, model);
+  }
+
+  export function deleteCellModel(shared: ISharedCodeCell): void {
+    cellModelRegistry.delete(shared.id);    
+  }
+
+  export function getCellModel(shared: ISharedCodeCell): IDataflowCodeCellModel | undefined {
+    return cellModelRegistry.get(shared.id);
   }
 
 }
