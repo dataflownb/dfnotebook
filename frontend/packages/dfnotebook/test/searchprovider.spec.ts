@@ -8,7 +8,7 @@ import {
   NotebookSearchProvider
 } from '@jupyterlab/notebook';
 import { Context } from '@jupyterlab/docregistry';
-import { NBTestUtils } from '@jupyterlab/notebook/lib/testutils';
+import { NBTestUtils } from '@dfnotebook/dfnotebook/lib/testutils';
 import { CodeEditor } from '@jupyterlab/codeeditor';
 import * as utils from './utils';
 

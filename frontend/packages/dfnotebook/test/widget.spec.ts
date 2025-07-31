@@ -2,12 +2,8 @@
 // Distributed under the terms of the Modified BSD License.
 
 import {
-  //Cell,
-  //CodeCell,
   CodeCellModel,
-  //MarkdownCell,
   MarkdownCellModel,
-  //RawCell,
   RawCellModel
 } from '@jupyterlab/cells';
 import {
@@ -19,13 +15,13 @@ import {
 import {
   INotebookModel,
   Notebook as NotebookType,
-  NotebookModel,
   StaticNotebook as StaticNotebookType
 } from '@jupyterlab/notebook';
 import {
   DataflowNotebook as Notebook,
-  DataflowStaticNotebook as StaticNotebook
-} from '../src';
+  DataflowStaticNotebook as StaticNotebook,
+  DataflowNotebookModel as NotebookModel
+} from '@dfnotebook/dfnotebook';
 
 import {
   framePromise,
@@ -105,7 +101,7 @@ class LogStaticNotebook extends StaticNotebookType {
   }
 }
 
-class LogNotebook extends NotebookType {
+class LogNotebook extends Notebook {
   events: string[] = [];
 
   methods: string[] = [];

@@ -8,7 +8,8 @@ import {
   NotebookTools,
   NotebookTracker
 } from '@jupyterlab/notebook';
-import { initNotebookContext } from '@jupyterlab/notebook/lib/testutils';
+import { DataflowNotebook as Notebook } from '@dfnotebook/dfnotebook';
+import { initNotebookContext } from '@dfnotebook/dfnotebook/lib/testutils';
 import { ObservableJSON } from '@jupyterlab/observables';
 import { JupyterServer, sleep } from '@jupyterlab/testing';
 import { Collapser } from '@jupyterlab/ui-components';
@@ -76,10 +77,10 @@ describe('@jupyterlab/notebook', () => {
     beforeEach(async () => {
       context0 = await initNotebookContext();
       panel0 = utils.createNotebookPanel(context0);
-      utils.populateNotebook(panel0.content);
+      utils.populateNotebook(panel0.content as Notebook);
       context1 = await initNotebookContext();
       panel1 = utils.createNotebookPanel(context1);
-      utils.populateNotebook(panel1.content);
+      utils.populateNotebook(panel1.content as Notebook);
       tracker = new NotebookTracker({ namespace: 'notebook' });
       await tracker.add(panel0);
       await tracker.add(panel1);

@@ -6,7 +6,7 @@
 import {
   DEFAULT_CONTENT,
   initNotebookContext
-} from '@jupyterlab/notebook/lib/testutils';
+} from '@dfnotebook/dfnotebook/lib/testutils';
 import { ServiceManagerMock } from '@jupyterlab/services/lib/testutils';
 import type { ServiceManager } from '@jupyterlab/services';
 

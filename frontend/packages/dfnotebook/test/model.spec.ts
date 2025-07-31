@@ -3,7 +3,7 @@
 
 import * as nbformat from '@jupyterlab/nbformat';
 import { acceptDialog } from '@jupyterlab/testing';
-import { NotebookModel } from '@jupyterlab/notebook';
+import { DataflowNotebookModel as NotebookModel } from '@dfnotebook/dfnotebook';
 import * as utils from './utils';
 
 import { describe, it, expect } from '@jest/globals';

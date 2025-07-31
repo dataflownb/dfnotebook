@@ -3,7 +3,7 @@
 
 import { ToolbarButton } from '@jupyterlab/apputils';
 import { Context } from '@jupyterlab/docregistry';
-import { initNotebookContext } from '@jupyterlab/notebook/lib/testutils';
+import { initNotebookContext } from '@dfnotebook/dfnotebook/lib/testutils';
 import { JupyterServer } from '@jupyterlab/testing';
 import {
   INotebookModel,

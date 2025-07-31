@@ -4,7 +4,7 @@
 
 import { DataflowCodeCell as Cell } from '@dfnotebook/dfcells';
 import { Context } from '@jupyterlab/docregistry';
-import { initNotebookContext } from '@jupyterlab/testutils';
+import { initNotebookContext } from '@dfnotebook/dfnotebook/lib/testutils';
 import { JupyterServer } from '@jupyterlab/testing';
 import { INotebookModel, NotebookPanel, NotebookTracker } from '@jupyterlab/notebook';
 import * as utils from './utils';
