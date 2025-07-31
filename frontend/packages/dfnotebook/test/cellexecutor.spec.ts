@@ -586,9 +586,9 @@ describe('@dfnotebook/cellExecutor', () => {
      result = await NotebookActions.run(panel.content, sessionContext);
      expect(result).toBe(true);
  
-     // verifies tagvalue is replced with uuid
+     // verifies tagvalue is NOT replaced with uuid (cell was deleted)
      const lastExecutedCell = panel.content.model?.cells.get(0) as ICodeCellModel;
-     expect(lastExecutedCell.sharedModel.getSource()).toBe('a=5\ntest=a+99\nb=a$'+refId+'+99');
+     expect(lastExecutedCell.sharedModel.getSource()).toBe('a=5\ntest=a+99\nb=a$testTag+99');
     }); 
    });
 
