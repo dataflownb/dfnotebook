@@ -1011,7 +1011,7 @@ describe('@jupyterlab/notebook', () => {
     describe('#runAll()', () => {
       beforeEach(() => {
         // Make sure all cells have valid code.
-        widget.widgets[2].model.sharedModel.setSource('a = 1');
+        widget.widgets[3].model.sharedModel.setSource('a = 1');
       });
 
       it('should run all of the cells in the notebook', async () => {
