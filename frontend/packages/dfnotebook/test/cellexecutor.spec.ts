@@ -1,14 +1,15 @@
 import { SessionContext, ISessionContext } from '@jupyterlab/apputils';
 import { createSessionContext } from '@jupyterlab/apputils/lib/testutils';
 import { JupyterServer } from '@jupyterlab/testing';
-import { DataflowNotebookModel } from '../src';
 import * as utils from './utils';
 import { Context } from '@jupyterlab/docregistry';
 import { INotebookModel, NotebookActions, NotebookPanel } from '@jupyterlab/notebook';
 import * as nbformat from '@jupyterlab/nbformat';
-import { CodeCell, ICodeCellModel } from '@jupyterlab/cells';
+import { ICodeCellModel } from '@jupyterlab/cells';
 import { truncateCellId } from '@dfnotebook/dfutils';
-import { updateNotebookCellsWithTag }  from '../../dfnotebook-extension/src/index';
+import { DataflowNotebookModel } from '@dfnotebook/dfnotebook';
+import { IDataflowCodeCellModel } from '@dfnotebook/dfcells';
+import { addCellName, removeCellName }  from '../../dfnotebook-extension/src/index';
 
 import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect } from '@jest/globals';
 
@@ -106,7 +107,7 @@ describe('@dfnotebook/cellExecutor', () => {
       const cell =  panel.content.model?.cells.get(1) as ICodeCellModel;
       expect(cell.outputs.length).toBe(1);
       expect(cell.outputs.get(0).data['text/plain']).toBe('18');
-      expect(cell.sharedModel.source).toBe('b=a+9');
+      expect(cell.sharedModel.getSource()).toBe('b=a+9');
     });
   
     it('uuid for identifier is retained in case of ambiguity', async () => {
@@ -386,8 +387,8 @@ describe('@dfnotebook/cellExecutor', () => {
 
       //add tag
       panel.content.select(panel.content.widgets[0]);
-      let firstCell = panel.content.widgets[0] as CodeCell;
-      (firstCell.inputArea as any).addTag?.("testTag");
+      const firstCell = panel.content.widgets[0].model as IDataflowCodeCellModel;
+      firstCell.cellName = "testTag";
       
       // code cell 2
       panel.content.model?.sharedModel.insertCell(1, {
@@ -465,9 +466,8 @@ describe('@dfnotebook/cellExecutor', () => {
 
       //add tag
       panel.content.select(panel.content.widgets[0]);
-      let cell = panel.content.widgets[0] as CodeCell;
-      (cell.inputArea as any).addTag?.("testTag");
-      await updateNotebookCellsWithTag(panel.content.model as DataflowNotebookModel, refId, sessionContext);
+      let cell = panel.content.widgets[0].model as IDataflowCodeCellModel;
+      await addCellName(panel.content.model as DataflowNotebookModel, sessionContext, cell, "testTag");
       
       // verifies tag is added for identifier references of 'a'
       secondCell = panel.content.model?.cells.get(1) as ICodeCellModel;
@@ -494,9 +494,9 @@ describe('@dfnotebook/cellExecutor', () => {
 
       //add tag
       panel.content.select(panel.content.widgets[0]);
-      let firstCell = panel.content.widgets[0] as CodeCell;
-      const refId = truncateCellId(firstCell.model.sharedModel.id);
-      (firstCell.inputArea as any).addTag?.("testTag");
+      let firstCell = panel.content.widgets[0].model as IDataflowCodeCellModel;
+      const refId = firstCell.cellId;
+      firstCell.cellName = "testTag";
 
       // code cell 2
       panel.content.model?.sharedModel.insertCell(1, {
@@ -535,10 +535,8 @@ describe('@dfnotebook/cellExecutor', () => {
       
       //delete tag
       panel.content.select(panel.content.widgets[0]);
-      firstCell = panel.content.widgets[0] as CodeCell;
-      (firstCell.inputArea as any).addTag?.("");
-
-      await updateNotebookCellsWithTag(panel.content.model as DataflowNotebookModel, refId, sessionContext);
+      firstCell = panel.content.widgets[0].model as IDataflowCodeCellModel;
+      await removeCellName(panel.context.model as DataflowNotebookModel, sessionContext, firstCell, true)
 
       // verifies UUID is added when tag is deleted
       secondCell = panel.content.model?.cells.get(1) as ICodeCellModel;
@@ -565,9 +563,8 @@ describe('@dfnotebook/cellExecutor', () => {
 
      //add tag
      panel.content.select(panel.content.widgets[0]);
-     const firstCell = panel.content.widgets[0] as CodeCell;
-     const refId = truncateCellId(firstCell.model.sharedModel.id);
-     (firstCell.inputArea as any).addTag?.("testTag");
+     const firstCell = panel.content.widgets[0].model as IDataflowCodeCellModel;
+     firstCell.cellName = "testTag";
      
      // code cell 2
      panel.content.model?.sharedModel.insertCell(1, {
@@ -607,17 +604,14 @@ describe('@dfnotebook/cellExecutor', () => {
       });
 
       let expectedDFMetadata = {
-              "inputVars": {
-               "ref": {},
-               "tag_refs": {}
-              },
-              "outputVars": [],
-              "persistentCode": "",
-              "tag": ""
-            }
+          output_tags: [],
+          input_refs: {},
+          auto_update: true,
+          force_cached: false
+      };
 
       let cell = panel.content.model?.cells.get(0) as ICodeCellModel;;
-      let dfmetadata = cell.sharedModel.getMetadata('dfmetadata')
+      let dfmetadata = cell.sharedModel.getMetadata('dfnotebook')
       expect(dfmetadata).toBeDefined();
       expect(dfmetadata).toEqual(expectedDFMetadata);
     });
@@ -654,18 +648,15 @@ describe('@dfnotebook/cellExecutor', () => {
       const firstCell = panel.content.model?.cells.get(0) as ICodeCellModel;
       const firstCellId = truncateCellId(firstCell.id);
   
-      const secondCell = panel.content.model?.cells.get(1) as ICodeCellModel;
-      let dfmetadata = secondCell.getMetadata("dfmetadata")
+      const secondCell = panel.content.model?.cells.get(1) as IDataflowCodeCellModel;
+      let dfmetadata = secondCell.getDataflowMetadata();
       
       // verifies references in cell 2 dfmetadata
       expect(dfmetadata).toBeDefined();
-        expect(dfmetadata.inputVars).toEqual({
-          "ref": {
-            [firstCellId]: ["a"]
-          },
-          "tag_refs": {}
-        });
-      expect(dfmetadata.outputVars).toEqual(['b'])
+      expect(dfmetadata.input_refs).toEqual({
+        "a": [firstCellId],
+      });
+      expect(dfmetadata.output_tags).toEqual(['b'])
     });
 
     it('persistentCode should be updated with executed code having references', async () => {
@@ -700,12 +691,12 @@ describe('@dfnotebook/cellExecutor', () => {
       const firstCell = panel.content.model?.cells.get(0) as ICodeCellModel;
       const firstCellId = truncateCellId(firstCell.id);
   
-      const secondCell = panel.content.model?.cells.get(1) as ICodeCellModel;
-      let dfmetadata = secondCell.getMetadata("dfmetadata")
+      const secondCell = panel.content.model?.cells.get(1) as IDataflowCodeCellModel;
+      let dfmetadata = secondCell.getDataflowMetadata();
       
       expect(dfmetadata).toBeDefined();
       expect(secondCell.sharedModel.getSource()).toEqual('b=a+9');
-      expect(dfmetadata.persistentCode).toEqual('b=a$'+firstCellId+'+9');
+      expect(dfmetadata.persistent_code).toEqual('b=a$'+firstCellId+'+9');
     });
   
     it('tag value should be updated in dfmetadata when cell is tagged', async () => {
@@ -720,11 +711,11 @@ describe('@dfnotebook/cellExecutor', () => {
       
       //const inputArea = (panel.content.widgets[0] as CodeCell).inputArea as any;
       
-      let cell = panel.content.widgets[0] as CodeCell;
-      (cell.inputArea as any).addTag?.("testTag");
-      let dfmetadata = cell.model.getMetadata('dfmetadata');
+      let cell = panel.content.widgets[0].model as IDataflowCodeCellModel;
+      cell.cellName = "testTag"
+      const dfmetadata = cell.getDataflowMetadata();
       expect(dfmetadata).toBeDefined();
-      expect(dfmetadata.tag).toEqual('testTag');
+      expect(dfmetadata.name).toEqual('testTag');
     });
 
     it('tag value should be updated when tag is deleted', async () => {
@@ -737,16 +728,16 @@ describe('@dfnotebook/cellExecutor', () => {
         }
       });
       
-      let cell = panel.content.widgets[0] as CodeCell;
-      (cell.inputArea as any).addTag?.("testTag");
-      let dfmetadata = cell.model.getMetadata('dfmetadata');
+      let cell = panel.content.widgets[0].model as IDataflowCodeCellModel;
+      cell.cellName = "testTag";
+      let dfmetadata = cell.getDataflowMetadata();
       expect(dfmetadata).toBeDefined();
-      expect(dfmetadata.tag).toEqual('testTag');
+      expect(dfmetadata.name).toEqual('testTag');
 
-      (cell.inputArea as any).addTag?.("");
-      dfmetadata = cell.model.getMetadata('dfmetadata');
+      cell.cellName = "";
+      dfmetadata = cell.getDataflowMetadata();
       expect(dfmetadata).toBeDefined();
-      expect(dfmetadata.tag).toEqual('');
+      expect(dfmetadata.name).toBeUndefined;
     });
   });
 });
