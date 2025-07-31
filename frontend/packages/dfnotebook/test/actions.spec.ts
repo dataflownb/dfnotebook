@@ -837,14 +837,14 @@ describe('@jupyterlab/notebook', () => {
       });
 
       it('should activate the cell after the last selected cell', async () => {
-        const next = widget.widgets[3] as MarkdownCell;
+        const next = widget.widgets[1] as MarkdownCell;
         widget.select(next);
         const result = await NotebookActions.runAndAdvance(
           widget,
           ipySessionContext
         );
         expect(result).toBe(true);
-        expect(widget.activeCellIndex).toBe(4);
+        expect(widget.activeCellIndex).toBe(2);
       });
 
       it('should create a new code cell in edit mode if necessary', async () => {
