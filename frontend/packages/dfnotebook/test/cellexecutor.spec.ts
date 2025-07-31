@@ -10,6 +10,8 @@ import { CodeCell, ICodeCellModel } from '@jupyterlab/cells';
 import { truncateCellId } from '@dfnotebook/dfutils';
 import { updateNotebookCellsWithTag }  from '../../dfnotebook-extension/src/index';
 
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect } from '@jest/globals';
+
 const server = new JupyterServer();
 
 beforeAll(async () => {
