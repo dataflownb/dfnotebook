@@ -68,6 +68,9 @@ export class DataflowNotebookModel extends NotebookModel {
 
       //@ts-expect-error
       sharedModel.changed.connect(newModel._onSharedModelChanged, newModel);
+      // this is set when new cells are added in NotebookModel so we
+      // need to reset it here...
+      newModel.contentChanged.connect(this.triggerContentChange, this);
 
       sharedModel.disposed.connect(() => {
         newModel.dispose();
