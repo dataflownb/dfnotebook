@@ -9,6 +9,8 @@ import { JupyterServer } from '@jupyterlab/testing';
 import { INotebookModel, NotebookPanel, NotebookTracker } from '@jupyterlab/notebook';
 import * as utils from './utils';
 
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect, jest } from '@jest/globals';
+
 const namespace = 'notebook-tracker-test';
 
 const server = new JupyterServer();

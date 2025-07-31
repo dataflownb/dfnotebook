@@ -17,6 +17,8 @@ import { PanelLayout, TabPanel, Widget } from '@lumino/widgets';
 import { simulate } from 'simulate-event';
 import * as utils from './utils';
 
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect } from '@jest/globals';
+
 class LogTool extends NotebookTools.Tool {
   methods: string[] = [];
 

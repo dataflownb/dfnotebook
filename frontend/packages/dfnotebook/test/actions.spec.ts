@@ -28,6 +28,8 @@ import {
 import { JSONArray, JSONObject, UUID } from '@lumino/coreutils';
 import * as utils from './utils';
 
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect } from '@jest/globals';
+
 const ERROR_INPUT = 'a = foo';
 
 const JUPYTER_CELL_MIME = 'application/vnd.jupyter.cells';

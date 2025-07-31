@@ -10,6 +10,8 @@ import {
 import { ServiceManagerMock } from '@jupyterlab/services/lib/testutils';
 import type { ServiceManager } from '@jupyterlab/services';
 
+import { describe, beforeAll, it, expect } from '@jest/globals';
+
 describe('Context#ready', () => {
   let manager: ServiceManager.IManager;
 

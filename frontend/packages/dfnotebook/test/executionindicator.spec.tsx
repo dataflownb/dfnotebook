@@ -19,6 +19,8 @@ import ReactDOMServer from 'react-dom/server';
 import * as utils from './utils';
 import { runCell } from '@dfnotebook/dfnotebook/lib/cellexecutor';
 
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect } from '@jest/globals';
+
 const fastCellModel = {
   cell_type: 'code',
   execution_count: 1,

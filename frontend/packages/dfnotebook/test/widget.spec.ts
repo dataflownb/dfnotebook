@@ -38,6 +38,8 @@ import { Widget } from '@lumino/widgets';
 import { generate, simulate } from 'simulate-event';
 import * as utils from './utils';
 
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect } from '@jest/globals';
+
 const server = new JupyterServer();
 
 beforeAll(async () => {

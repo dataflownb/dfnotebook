@@ -6,6 +6,8 @@ import { acceptDialog } from '@jupyterlab/testing';
 import { NotebookModel } from '@jupyterlab/notebook';
 import * as utils from './utils';
 
+import { describe, it, expect } from '@jest/globals';
+
 describe('@jupyterlab/notebook', () => {
   describe('NotebookModel', () => {
     describe('#constructor()', () => {

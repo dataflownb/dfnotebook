@@ -13,6 +13,8 @@ import {
 
 import * as utils from './utils';
 
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect } from '@jest/globals';
+
 const rendermime = utils.defaultRenderMime();
 
 const server = new JupyterServer();

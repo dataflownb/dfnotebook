@@ -3,6 +3,8 @@
 
 import { NotebookModel, NotebookModelFactory } from '@jupyterlab/notebook';
 
+import { describe, it, expect } from '@jest/globals';
+
 describe('@jupyterlab/notebook', () => {
   describe('NotebookModelFactory', () => {
     describe('#constructor', () => {

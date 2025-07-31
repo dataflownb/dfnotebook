@@ -8,6 +8,8 @@ import { Toolbar } from '@jupyterlab/ui-components';
 import { INotebookModel, Notebook, NotebookPanel } from '@jupyterlab/notebook';
 import * as utils from './utils';
 
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect } from '@jest/globals';
+
 /**
  * Default data.
  */
