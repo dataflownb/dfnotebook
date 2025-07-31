@@ -3,20 +3,20 @@
 
 import { ISessionContext, SessionContext } from '@jupyterlab/apputils';
 import { createSessionContext } from '@jupyterlab/apputils/lib/testutils';
-//import { CodeCell, MarkdownCell, RawCell } from '@jupyterlab/cells';
 import { DataflowCodeCell as CodeCell, DataflowMarkdownCell as MarkdownCell, DataflowRawCell as RawCell } from '@dfnotebook/dfcells';
 import { CodeEditor } from '@jupyterlab/codeeditor';
 import { CellType, IMimeBundle } from '@jupyterlab/nbformat';
 import {
   KernelError,
-//  Notebook,
   NotebookActions,
-  NotebookModel,
-  StaticNotebook as StaticNotebookType
+  StaticNotebook,
+  setCellExecutor
 } from '@jupyterlab/notebook';
 import {
   DataflowNotebook as Notebook,
-} from '../src';
+  DataflowNotebookModel as NotebookModel,
+  runCell,
+} from '@dfnotebook/dfnotebook';
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { ISharedCodeCell } from '@jupyter/ydoc';
 import {
@@ -35,6 +35,7 @@ const JUPYTER_CELL_MIME = 'application/vnd.jupyter.cells';
 const server = new JupyterServer();
 
 beforeAll(async () => {
+  setCellExecutor(Object.freeze({runCell}));
   await server.start({'additionalKernelSpecs':{'dfpython3':{'argv':['python','-m','dfnotebook.kernel','-f','{connection_file}'],'display_name':'DFPython 3','language':'python'}}});
 }, 30000);
 
@@ -61,7 +62,7 @@ describe('@jupyterlab/notebook', () => {
       }
       [sessionContext, ipySessionContext] = await Promise.all([
         createContext(),
-        createContext({ kernelPreference: { name: 'ipython' } })
+        createContext({ kernelPreference: { name: 'dfpython3' } })
       ]);
     }, 30000);
 
@@ -71,7 +72,7 @@ describe('@jupyterlab/notebook', () => {
         contentFactory: utils.createNotebookFactory(),
         mimeTypeService: utils.mimeTypeService,
         notebookConfig: {
-          ...StaticNotebookType.defaultNotebookConfig,
+          ...StaticNotebook.defaultNotebookConfig,
           windowingMode: 'none'
         }
       });
@@ -113,7 +114,7 @@ describe('@jupyterlab/notebook', () => {
           }
         });
 
-        await NotebookActions.run(widget, sessionContext);
+        await NotebookActions.run(widget, ipySessionContext);
         expect(emitted).toBe(2);
         expect(failed).toBe(0);
         expect(next.rendered).toBe(true);
@@ -160,7 +161,7 @@ describe('@jupyterlab/notebook', () => {
           emitted += 1;
         });
 
-        await NotebookActions.run(widget, sessionContext);
+        await NotebookActions.run(widget, ipySessionContext);
         expect(emitted).toBe(1);
         expect(next.rendered).toBe(true);
       });
@@ -648,7 +649,7 @@ describe('@jupyterlab/notebook', () => {
         const cell = widget.activeCell as CodeCell;
         cell.model.outputs.clear();
         next.rendered = false;
-        const result = await NotebookActions.run(widget, sessionContext);
+        const result = await NotebookActions.run(widget, ipySessionContext);
         expect(result).toBe(true);
         expect(cell.model.outputs.length).toBeGreaterThan(0);
         expect(next.rendered).toBe(true);
@@ -662,7 +663,7 @@ describe('@jupyterlab/notebook', () => {
           emitted += 1;
         });
         cell.model.outputs.clear();
-        return NotebookActions.run(widget, sessionContext).then((result: any) => {
+        return NotebookActions.run(widget, ipySessionContext).then((result: any) => {
           expect(result).toBe(true);
           expect(widget.model!.deletedCells.length).toBe(0);
           expect(emitted).toBe(1);
@@ -675,7 +676,7 @@ describe('@jupyterlab/notebook', () => {
         NotebookActions.selectionExecuted.connect(() => {
           emitted += 1;
         });
-        const result = await NotebookActions.run(widget, sessionContext);
+        const result = await NotebookActions.run(widget, ipySessionContext);
         expect(result).toBe(false);
         expect(emitted).toBe(0);
       });
@@ -688,7 +689,7 @@ describe('@jupyterlab/notebook', () => {
         });
         widget.select(other);
         other.model.sharedModel.setSource('a = 1');
-        const result = await NotebookActions.run(widget, sessionContext);
+        const result = await NotebookActions.run(widget, ipySessionContext);
         expect(result).toBe(true);
         expect(widget.activeCell).toBe(other);
         expect(emitted).toBe(1);
@@ -701,7 +702,7 @@ describe('@jupyterlab/notebook', () => {
           emitted += 1;
         });
         widget.select(next);
-        const result = await NotebookActions.run(widget, sessionContext);
+        const result = await NotebookActions.run(widget, ipySessionContext);
         expect(result).toBe(true);
         expect(widget.isSelected(widget.widgets[0])).toBe(false);
         expect(emitted).toBe(1);
@@ -713,7 +714,7 @@ describe('@jupyterlab/notebook', () => {
         NotebookActions.selectionExecuted.connect(() => {
           emitted += 1;
         });
-        const result = await NotebookActions.run(widget, sessionContext);
+        const result = await NotebookActions.run(widget, ipySessionContext);
         expect(result).toBe(true);
         expect(widget.mode).toBe('command');
         expect(emitted).toBe(1);
@@ -795,7 +796,7 @@ describe('@jupyterlab/notebook', () => {
         next.rendered = false;
         const result = await NotebookActions.runAndAdvance(
           widget,
-          sessionContext
+          ipySessionContext
         );
         expect(result).toBe(true);
         expect(cell.model.outputs.length).toBeGreaterThan(0);
@@ -806,7 +807,7 @@ describe('@jupyterlab/notebook', () => {
         widget.model = null;
         const result = await NotebookActions.runAndAdvance(
           widget,
-          sessionContext
+          ipySessionContext
         );
         expect(result).toBe(false);
       });
@@ -826,7 +827,7 @@ describe('@jupyterlab/notebook', () => {
         widget.mode = 'edit';
         const result = await NotebookActions.runAndAdvance(
           widget,
-          sessionContext
+          ipySessionContext
         );
         expect(result).toBe(true);
         expect(widget.mode).toBe('command');
@@ -837,7 +838,7 @@ describe('@jupyterlab/notebook', () => {
         widget.select(next);
         const result = await NotebookActions.runAndAdvance(
           widget,
-          sessionContext
+          ipySessionContext
         );
         expect(result).toBe(true);
         expect(widget.activeCellIndex).toBe(4);
@@ -848,7 +849,7 @@ describe('@jupyterlab/notebook', () => {
         widget.activeCellIndex = count - 1;
         const result = await NotebookActions.runAndAdvance(
           widget,
-          sessionContext
+          ipySessionContext
         );
         expect(result).toBe(true);
         expect(widget.widgets.length).toBe(count + 1);
@@ -862,7 +863,7 @@ describe('@jupyterlab/notebook', () => {
         widget.activeCellIndex = count - 1;
         const result = await NotebookActions.runAndAdvance(
           widget,
-          sessionContext
+          ipySessionContext
         );
         expect(result).toBe(true);
         NotebookActions.undo(widget);
@@ -912,7 +913,7 @@ describe('@jupyterlab/notebook', () => {
         next.rendered = false;
         const result = await NotebookActions.runAndInsert(
           widget,
-          sessionContext
+          ipySessionContext
         );
         expect(result).toBe(true);
         expect(cell.model.outputs.length).toBeGreaterThan(0);
@@ -923,7 +924,7 @@ describe('@jupyterlab/notebook', () => {
         widget.model = null;
         const result = await NotebookActions.runAndInsert(
           widget,
-          sessionContext
+          ipySessionContext
         );
         expect(result).toBe(false);
       });
@@ -933,7 +934,7 @@ describe('@jupyterlab/notebook', () => {
         widget.select(next);
         const result = await NotebookActions.runAndInsert(
           widget,
-          sessionContext
+          ipySessionContext
         );
         expect(result).toBe(true);
         expect(widget.isSelected(widget.widgets[0])).toBe(false);
@@ -946,7 +947,7 @@ describe('@jupyterlab/notebook', () => {
         const count = widget.widgets.length;
         const result = await NotebookActions.runAndInsert(
           widget,
-          sessionContext
+          ipySessionContext
         );
         expect(result).toBe(true);
         expect(widget.activeCell).toBeInstanceOf(CodeCell);
@@ -962,7 +963,7 @@ describe('@jupyterlab/notebook', () => {
         const count = widget.widgets.length;
         const result = await NotebookActions.runAndInsert(
           widget,
-          sessionContext
+          ipySessionContext
         );
         expect(result).toBe(true);
         NotebookActions.undo(widget);
@@ -1015,7 +1016,7 @@ describe('@jupyterlab/notebook', () => {
         const cell = widget.activeCell as CodeCell;
         cell.model.outputs.clear();
         next.rendered = false;
-        const result = await NotebookActions.runAll(widget, sessionContext);
+        const result = await NotebookActions.runAll(widget, ipySessionContext);
         expect(result).toBe(true);
         expect(cell.model.outputs.length).toBeGreaterThan(0);
         expect(next.rendered).toBe(true);
@@ -1023,13 +1024,13 @@ describe('@jupyterlab/notebook', () => {
 
       it('should be a no-op if there is no model', async () => {
         widget.model = null;
-        const result = await NotebookActions.runAll(widget, sessionContext);
+        const result = await NotebookActions.runAll(widget, ipySessionContext);
         expect(result).toBe(false);
       });
 
       it('should change to command mode', async () => {
         widget.mode = 'edit';
-        const result = await NotebookActions.runAll(widget, sessionContext);
+        const result = await NotebookActions.runAll(widget, ipySessionContext);
         expect(result).toBe(true);
         expect(widget.mode).toBe('command');
       });
@@ -1037,13 +1038,13 @@ describe('@jupyterlab/notebook', () => {
       it('should clear the existing selection', async () => {
         const next = widget.widgets[2];
         widget.select(next);
-        const result = await NotebookActions.runAll(widget, sessionContext);
+        const result = await NotebookActions.runAll(widget, ipySessionContext);
         expect(result).toBe(true);
         expect(widget.isSelected(widget.widgets[2])).toBe(false);
       });
 
       it('should activate the last cell', async () => {
-        await NotebookActions.runAll(widget, sessionContext);
+        await NotebookActions.runAll(widget, ipySessionContext);
         expect(widget.activeCellIndex).toBe(widget.widgets.length - 1);
       });
 
