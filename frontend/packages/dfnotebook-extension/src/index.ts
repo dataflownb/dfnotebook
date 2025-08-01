@@ -765,7 +765,7 @@ function addExecuteInputHandler(nbPanel: NotebookPanel) {
           }) as CodeCell;
           const cellModel = matchingCell.model as IDataflowCodeCellModel;
           cellModel.code = (msg as KernelMessage.IExecuteInputMsg).content.code;
-          matchingCell.model.outputs.clear();        
+          matchingCell.model.clearExecution();
         }
         break;
       default:
