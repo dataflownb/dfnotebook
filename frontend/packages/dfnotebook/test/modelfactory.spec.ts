@@ -1,7 +1,12 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { NotebookModel, NotebookModelFactory } from '@jupyterlab/notebook';
+import { 
+  DataflowNotebookModel as NotebookModel, 
+  DataflowNotebookModelFactory as NotebookModelFactory
+} from '@dfnotebook/dfnotebook';
+
+import { describe, it, expect } from '@jest/globals';
 
 describe('@jupyterlab/notebook', () => {
   describe('NotebookModelFactory', () => {
@@ -15,7 +20,7 @@ describe('@jupyterlab/notebook', () => {
     describe('#name', () => {
       it('should get the name of the model factory', () => {
         const factory = new NotebookModelFactory({});
-        expect(factory.name).toBe('notebook');
+        expect(factory.name).toBe('dfnotebook');
       });
     });
 

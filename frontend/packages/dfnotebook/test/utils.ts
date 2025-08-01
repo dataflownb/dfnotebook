@@ -12,7 +12,7 @@ import {
 import {
   DataflowNotebook as Notebook,
   DataflowNotebookWidgetFactory as NotebookWidgetFactory
-} from '../src';
+} from '@dfnotebook/dfnotebook';
 import { NBTestUtils } from '@dfnotebook/dfnotebook/lib/testutils';
 import * as defaultContent45 from './default-45.json';
 import * as emptyContent from './empty.json';

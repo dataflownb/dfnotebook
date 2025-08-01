@@ -21,6 +21,8 @@ import {
 } from '@jupyterlab/notebook';
 import * as utils from './utils';
 
+import { describe, beforeEach, afterEach, it, expect } from '@jest/globals';
+
 const JUPYTER_CELL_MIME = 'application/vnd.jupyter.cells';
 
 describe('@jupyterlab/notebook', () => {

@@ -9,15 +9,18 @@ import { JupyterServer } from '@jupyterlab/testing';
 import {
   ExecutionIndicator,
   ExecutionIndicatorComponent,
-  Notebook,
   NotebookActions,
-  NotebookModel,
   setCellExecutor
 } from '@jupyterlab/notebook';
 import React from 'react';
 import ReactDOMServer from 'react-dom/server';
 import * as utils from './utils';
-import { runCell } from '@dfnotebook/dfnotebook/lib/cellexecutor';
+import { runCell, 
+  DataflowNotebook as Notebook, 
+  DataflowNotebookModel as NotebookModel
+} from '@dfnotebook/dfnotebook';
+
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect } from '@jest/globals';
 
 const fastCellModel = {
   cell_type: 'code',
@@ -81,7 +84,8 @@ describe('@jupyterlab/notebook', () => {
     async function setupSessions() {
       [sessionContext, ipySessionContext] = await Promise.all([
         createContext(),
-        createContext({ kernelPreference: { name: 'ipython' } })
+        createContext({'kernelPreference':
+        {'name':'dfpython3','autoStartDefault':true,'shouldStart':true}})
       ]);
     }
 

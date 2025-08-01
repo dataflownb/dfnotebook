@@ -8,10 +8,11 @@ import {
   NotebookSearchProvider
 } from '@jupyterlab/notebook';
 import { Context } from '@jupyterlab/docregistry';
-import { NBTestUtils } from '@jupyterlab/notebook/lib/testutils';
+import { NBTestUtils } from '@dfnotebook/dfnotebook/lib/testutils';
 import { CodeEditor } from '@jupyterlab/codeeditor';
 import * as utils from './utils';
 
+import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals';
 /**
  * To avoid relying on ydoc passing the selections via server
  * (this test runs without a server for efficiency) we also set

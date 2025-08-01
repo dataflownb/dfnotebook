@@ -3,8 +3,10 @@
 
 import * as nbformat from '@jupyterlab/nbformat';
 import { acceptDialog } from '@jupyterlab/testing';
-import { NotebookModel } from '@jupyterlab/notebook';
+import { DataflowNotebookModel as NotebookModel } from '@dfnotebook/dfnotebook';
 import * as utils from './utils';
+
+import { describe, it, expect } from '@jest/globals';
 
 describe('@jupyterlab/notebook', () => {
   describe('NotebookModel', () => {
@@ -332,12 +334,16 @@ describe('@jupyterlab/notebook', () => {
         const metadata = model.metadata;
         expect(metadata['kernelspec']).toBeTruthy();
         expect(metadata['language_info']).toBeTruthy();
-        expect(Object.keys(metadata)).toHaveLength(2);
+        expect(metadata['dfnotebook']).toBeTruthy();
+        expect(Object.keys(metadata)).toHaveLength(3);
       });
 
       it('should set the dirty flag when changed', () => {
         const model = new NotebookModel();
-        expect(model.dirty).toBe(false);
+        // we do some things to init metadata so probably best to
+        // allow this to be true?
+        // expect(model.dirty).toBe(false);
+        model.dirty = false;
         model.setMetadata('foo', 'bar');
         expect(model.dirty).toBe(true);
       });

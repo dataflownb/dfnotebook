@@ -2,12 +2,8 @@
 // Distributed under the terms of the Modified BSD License.
 
 import {
-  //Cell,
-  //CodeCell,
   CodeCellModel,
-  //MarkdownCell,
   MarkdownCellModel,
-  //RawCell,
   RawCellModel
 } from '@jupyterlab/cells';
 import {
@@ -19,13 +15,13 @@ import {
 import {
   INotebookModel,
   Notebook as NotebookType,
-  NotebookModel,
   StaticNotebook as StaticNotebookType
 } from '@jupyterlab/notebook';
 import {
   DataflowNotebook as Notebook,
-  DataflowStaticNotebook as StaticNotebook
-} from '../src';
+  DataflowStaticNotebook as StaticNotebook,
+  DataflowNotebookModel as NotebookModel
+} from '@dfnotebook/dfnotebook';
 
 import {
   framePromise,
@@ -37,6 +33,8 @@ import { Message, MessageLoop } from '@lumino/messaging';
 import { Widget } from '@lumino/widgets';
 import { generate, simulate } from 'simulate-event';
 import * as utils from './utils';
+
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect } from '@jest/globals';
 
 const server = new JupyterServer();
 
@@ -103,7 +101,7 @@ class LogStaticNotebook extends StaticNotebookType {
   }
 }
 
-class LogNotebook extends NotebookType {
+class LogNotebook extends Notebook {
   events: string[] = [];
 
   methods: string[] = [];

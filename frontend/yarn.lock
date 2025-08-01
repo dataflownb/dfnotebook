@@ -1654,6 +1654,7 @@ __metadata:
     "@jupyterlab/notebook-extension": ^4.2.7
     "@jupyterlab/observables": ^5.2.7
     "@jupyterlab/rendermime": ^4.2.7
+    "@jupyterlab/services": ^7.2.7
     "@jupyterlab/settingregistry": ^4.2.7
     "@jupyterlab/translation": ^4.2.7
     "@jupyterlab/ui-components": ^4.2.7

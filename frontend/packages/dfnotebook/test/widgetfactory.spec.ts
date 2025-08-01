@@ -3,7 +3,7 @@
 
 import { ToolbarButton } from '@jupyterlab/apputils';
 import { Context } from '@jupyterlab/docregistry';
-import { initNotebookContext } from '@jupyterlab/notebook/lib/testutils';
+import { initNotebookContext } from '@dfnotebook/dfnotebook/lib/testutils';
 import { JupyterServer } from '@jupyterlab/testing';
 import {
   INotebookModel,
@@ -12,6 +12,8 @@ import {
 } from '@jupyterlab/notebook';
 
 import * as utils from './utils';
+
+import { describe, afterAll, beforeAll, beforeEach, afterEach, it, expect } from '@jest/globals';
 
 const rendermime = utils.defaultRenderMime();
 
